@@ -19,7 +19,11 @@ const cliVersion = JSON.parse(await readFile(join(root, 'node_modules/@deepseek-
 if (cliVersion !== baseVersion) throw new Error('Preview CLI and Base must use the same pinned version.');
 const home = resolve(process.env.WORKDSH_PREVIEW_HOME ?? join(root, '.test-runtime/preview'));
 const artifacts = join(root, '.artifacts');
-const env = { ...process.env, DSH_HOME: home, PATH: `${join(root, 'node_modules/.bin')}:${dirname(process.execPath)}:${process.env.PATH}` };
+// The preview Profile is itself a pnpm workspace root, and `dsh plugin add`
+// forwards to `pnpm add` without `-w`, which pnpm >=10 rejects with
+// ERR_PNPM_ADDING_TO_ROOT. Every add targets this Profile deliberately, so
+// acknowledge the workspace root instead of patching the generated tree.
+const env = { ...process.env, DSH_HOME: home, npm_config_ignore_workspace_root_check: 'true', PATH: `${join(root, 'node_modules/.bin')}:${dirname(process.execPath)}:${process.env.PATH}` };
 const exec = promisify(execFile);
 const run = async (tool, args) => {
   await exec(process.execPath, [join(root, 'node_modules', tool), ...args], { cwd: root, env, timeout: 180_000, maxBuffer: 8 * 1024 * 1024 });
@@ -97,6 +101,28 @@ for (const { directory, manifest } of packages) {
     const installed = await readFile(join(home, 'profiles/preview/node_modules', manifest.name, entry));
     if (!expected.equals(installed)) throw new Error(`Installed ${manifest.name} ${face} differs from the current build; refusing to report a successful preview update.`);
   }
+}
+// A bundle whose peerDependencies miss the runtime version is dropped from the
+// composed tree SILENTLY (loadProfileDirectory collects it without printing),
+// which presents as an empty sidebar with no error anywhere. dsh takes the
+// runtime version from dsh-app-boot's own package.json, so a dsh installed by
+// npm (whose ^0.1.7-alpha.1 range resolves up to 0.1.7-rc.2) silently discards
+// every WorkDSH layer. Resolve the layers exactly as the launcher does and
+// refuse to report success while any declared bundle is absent.
+// Anchor on the real path: the CLI is a pnpm symlink, and CommonJS resolution
+// does not follow it into .pnpm, so app-boot would be unresolvable.
+const repoRequire = createRequire(await realpath(join(root, 'node_modules/@deepseek-ai/dsh/package.json')));
+const { loadProfileDirectory } = await import(repoRequire.resolve('@deepseek-ai/dsh-app-boot'));
+const declaredBundles = JSON.parse(await readFile(join(home, 'profiles/preview/package.json'), 'utf8')).dsh?.profile?.bundles ?? [];
+const loadedBundles = new Set(loadProfileDirectory('dsh', join(home, 'profiles/preview'), join(root, 'node_modules/@deepseek-ai/dsh/package.json')).layers.map((layer) => layer.packageName));
+const missingBundles = declaredBundles.filter((name) => !loadedBundles.has(name));
+if (missingBundles.length > 0) {
+  const runtimeVersion = JSON.parse(await readFile(repoRequire.resolve('@deepseek-ai/dsh-app-boot/package.json'), 'utf8')).version;
+  throw new Error(`Preview bundles did not load: ${missingBundles.join(', ')}\n`
+    + `dsh runtime version is ${runtimeVersion}. Launch the preview with this repository's CLI `
+    + `(node_modules/@deepseek-ai/dsh/lib/bin.js), never a global npm install of @deepseek-ai/dsh: `
+    + `npm resolves its ^0.1.7-alpha.1 dependency range to a newer prerelease, and every bundle whose `
+    + `peerDependencies do not satisfy that version is dropped without a diagnostic.`);
 }
 console.log('Installed Skill, Expert, Connector, Office, Library, Projects and WorkDSH presentation as separate official Profile layers.');
 console.log('Start the stopped preview with: corepack pnpm preview');
