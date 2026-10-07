@@ -2086,3 +2086,14 @@ Office build/typecheck 以及 content/download/rich-editor 30 项相关测试通
 另外两项：`dsh plugin add` 转发 `pnpm add` 时不带 `-w`，被 pnpm 10 以 `ERR_PNPM_ADDING_TO_ROOT` 拒绝，`preview:install` 在仓库锁定的 pnpm 10.34.5 上必然失败（已复现），改为在脚本自身 spawn 环境中设置 `npm_config_ignore_workspace_root_check`；预览 Profile 与启动器解析到两份物理 `dsh-app-boot`，其模块级 `bootstrapIncludes` WeakMap 不共享，导致设置写入（新增模型提供方）在 reload 时报 “profile reload requires the root Include entry”，现将 Profile 侧软链到启动器所用副本，实测新增提供方与主题写入均成功持久化且无错误。
 
 本次未提交、未推送、未发布。用户自建的 `haowise` 模型提供方配置已确认保留；验证用的临时条目已清理。尚未验证：全新机器从零 clone 的完整流程、Windows 与 macOS 上的安装路径。
+## 2026-10-08：自定义模型提供方导致 compaction 永久失效
+
+自定义 OpenAI 兼容提供方（haowise，localhost:18000/v1）会话溢出后无法自动压缩：请求返回 `400 status code (no body)` → `CONTEXT_WINDOW_EXCEEDED` → “Compaction could not produce a useful summary” → continue 重复同一失败。已用 150012 token 实测复现并定位到唯一根因。
+
+`dsh-compaction-basic` 计算 `resolveCompactSpec`：`messageBudget = contextWindow − reservedCompletionTokens`，再 `pressureBudget = messageBudget − headroomTokens`，任一 ≤0 即抛 `TargetPressureConfigError`。本例 `contextWindow` 与 `maxTokens` 同为 65535，`messageBudget = 0`；即便先把 `maxTokens` 降到 8192，`headroomTokens` 仍取默认 65536，`pressureBudget = 40960 − 65536` 为负。两种情况都使按压式 compaction 被整体跳过（仅一次性 warn，不报错），会话因此无界增长直至溢出。溢出补救单次触发且 `retainTokens = 0`，摘要请求几乎包含整个会话，同样超窗而失败；失败分支 `return next()` 且不累加 `overflowRetries`，故每次 continue 重复同一路径，形成死锁。
+
+已核实：服务器真实 `n_ctx` 为 65536（模型名中的 256K 不作数）；pi-ai 的 `OVERFLOW_PATTERNS` 含 `/^4(?:00|13)\s*(?:status code)?\s*\(no body\)/i`，因此该 bodyless 400 **会**被正确归类为 CONTEXT_WINDOW_EXCEEDED，补救路径确实触发。HaoWise 网关 `api/main.py:230` 将上游错误体字符串化进 `detail`（`{"detail":"{\"error\":…}"}`）属真实缺陷，但因上述兜底模式不致本例失效。
+
+配置修复（写入预览 Profile `cordis.patch.yml`，`.test-runtime/` 已被 gitignore，故仅记录于此）：`maxTokens` 降至 8192、`contextWindow` 保持 49152、并显式设置 `compaction-basic` 的 `headroomTokens: 8192` 与 `maxOverflowRetries: 3`。修后 `messageBudget = 40960`、`pressureBudget = 32768`，按压式 compaction 于约 32768 token 触发、保留约 6553 token。启动日志已无 pressure 配置告警，浏览器实测模型选择器正常返回 haowise 路由且无 pageerror。
+
+未验证：既有卡死会话无法原地恢复（历史未被压缩，需新建会话）；网关错误体透传未修改；尚未在真实长会话上确认自动压缩按预期触发。
