@@ -2077,3 +2077,12 @@ Office build/typecheck 以及 content/download/rich-editor 30 项相关测试通
 ## 2026-09-24：技能市场未配置目录静默显示
 
 用户反馈 Windows 发布版无本地技能目录时显示内部路径与仓库脚本提示。技能市场现将 `missing` 视为正常空状态，不显示该诊断；已有技能继续可见。目录存在但无法解析时保留简短错误。技能插件构建和 typecheck 通过。此项为已发布技能插件的缺陷修复，不改变市场目录来源；Windows 资源卡片“已在文件管理器中显示”但未实际打开的问题属于 Harness 原生文件打开链路，仍待 Windows 路径和原生命令实测。
+## 2026-10-08：技能“去试试”与预览打包修复
+
+技能页“去试试”此前以 `state === 'enabled'` 作为可用条件，而 Host 侧 `SkillManager` 对不可管理的内置技能写入 `state: 'readonly'`（`services/manager.ts` 中 `state: manageable ? 'enabled' : 'readonly'`），且卡片 `•••` 菜单整体受 `skill.manageable` 控制。结果是 6 个内置技能（excel/ppt/word/web design、expert-manager、skill-creator）没有菜单入口、详情页按钮置灰，只有用户自装的 `grill-me` 可用。“只读”表示不可编辑/卸载/启停，并不表示不可调用。现改为按可调用性判定（仅 `disabled`/`invalid` 阻止），并让所有技能都有菜单、仅 `manageable` 时显示管理项。客户端改动，`workdsh-plugin-skills` typecheck 与 build 通过；18989 预览实测 7 个技能均有菜单，内置技能菜单仅含“去试试”，点击后正确生成 `/workdsh-excel-design` 会话，无 pageerror。
+
+预览无法加载任何工作台模块的根因是 dsh 以 `dsh-app-boot` 自身 package.json 的版本作为“运行时版本”，peerDependencies 不满足的 bundle 会被 `loadProfileDirectory` 收入 `skippedBundles` 且不打印任何诊断。仓库 pnpm.overrides 将全部 `@deepseek-ai/dsh*` 锁定到 `0.1.7-alpha.1`，而全局 `npm i -g @deepseek-ai/dsh` 会把其 `^0.1.7-alpha.1` 依赖范围解析到 `0.1.7-rc.2`，导致 13 个 bundle 只加载 3 个、界面只剩工作台自身提供的项目与资料库。已实测该场景（13 声明 / 3 加载 / 10 缺失）。`install-preview.mjs` 新增断言，按启动器同一路径解析 bundle 层，缺失即失败并给出运行时版本与成因；断言对 rc.2 运行时确认为真阳性。
+
+另外两项：`dsh plugin add` 转发 `pnpm add` 时不带 `-w`，被 pnpm 10 以 `ERR_PNPM_ADDING_TO_ROOT` 拒绝，`preview:install` 在仓库锁定的 pnpm 10.34.5 上必然失败（已复现），改为在脚本自身 spawn 环境中设置 `npm_config_ignore_workspace_root_check`；预览 Profile 与启动器解析到两份物理 `dsh-app-boot`，其模块级 `bootstrapIncludes` WeakMap 不共享，导致设置写入（新增模型提供方）在 reload 时报 “profile reload requires the root Include entry”，现将 Profile 侧软链到启动器所用副本，实测新增提供方与主题写入均成功持久化且无错误。
+
+本次未提交、未推送、未发布。用户自建的 `haowise` 模型提供方配置已确认保留；验证用的临时条目已清理。尚未验证：全新机器从零 clone 的完整流程、Windows 与 macOS 上的安装路径。
