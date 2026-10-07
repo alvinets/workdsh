@@ -2097,3 +2097,5 @@ Office build/typecheck 以及 content/download/rich-editor 30 项相关测试通
 配置修复（写入预览 Profile `cordis.patch.yml`，`.test-runtime/` 已被 gitignore，故仅记录于此）：`maxTokens` 降至 8192、`contextWindow` 保持 49152、并显式设置 `compaction-basic` 的 `headroomTokens: 8192` 与 `maxOverflowRetries: 3`。修后 `messageBudget = 40960`、`pressureBudget = 32768`，按压式 compaction 于约 32768 token 触发、保留约 6553 token。启动日志已无 pressure 配置告警，浏览器实测模型选择器正常返回 haowise 路由且无 pageerror。
 
 未验证：既有卡死会话无法原地恢复（历史未被压缩，需新建会话）；网关错误体透传未修改；尚未在真实长会话上确认自动压缩按预期触发。
+
+已新增 `examples/local-llm-provider/`（README + cordis.patch.yml），把上述约束固化为可复制示例：`contextWindow` 小于后端真实值、`maxTokens` 显著小于 `contextWindow`、显式设置 `headroomTokens`，并说明三种导致按压式 compaction 被跳过的写法与验证方法。预览 Profile 的实际修复位于 `.test-runtime/`（被 gitignore），示例是它唯一的可版本化载体。
