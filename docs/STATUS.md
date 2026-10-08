@@ -2231,3 +2231,19 @@ Office build/typecheck 以及 content/download/rich-editor 30 项相关测试通
 未验证：既有卡死会话无法原地恢复（历史未被压缩，需新建会话）；网关错误体透传未修改；尚未在真实长会话上确认自动压缩按预期触发。
 
 已新增 `examples/local-llm-provider/`（README + cordis.patch.yml），把上述约束固化为可复制示例：`contextWindow` 小于后端真实值、`maxTokens` 显著小于 `contextWindow`、显式设置 `headroomTokens`，并说明三种导致按压式 compaction 被跳过的写法与验证方法。预览 Profile 的实际修复位于 `.test-runtime/`（被 gitignore），示例是它唯一的可版本化载体。
+
+## 2026-10-08：AT3000_latest 合并上游 main
+
+从 `AT3000` 建出 `AT3000_latest` 并把此前未提交的工作整理为 7 个原子提交（锁文件清理、HAOWISE 品牌、日志镜像、office 的 HTML 操作说明、provider 示例的 maxTokens 说明、compaction 示例、STATUS/模块登记），随后合并 `origin/main`（13,409 提交；`workdsh-bundle` alpha.48→alpha.53）为 `288bbd19fe`。`AT3000` 保持 `4d0a29f1b3`，与 `alvinets/AT3000` 一致，作为回退备份未动。
+
+上游本次重构把 `docs/`、`examples/`、多数 `scripts/` 迁入 `apps/web`，仓库根变为 Desktop 载体（yarn 4.18.0、`nodeLinker: node-modules`），`apps/web` 保留独立 pnpm 工作区；DSH 版本由 `0.1.7-alpha.1` 升到 `0.2.0-rc.2`（Cordis 4.0.4）。已核实 `upstream.json` 与 `packages/*`、`apps/web` 的全部 override 均精确等于 `0.2.0-rc.2`，版本对齐无偏差。
+
+冲突解决 5 处（`probe.ts`、`bundle/package.json`、`apps/web/scripts/install-preview.mjs`、`apps/web/docs/modules.json`、`docs/STATUS.md`）。另有一处**静默破坏**：`packages/bundle/src/client/components/Brand.tsx` 被自动合并为上游版本，丢掉了 `harness/client.ts` 仍在导入并注册的 HAOWISE 导出，该状态无法编译，已从 `b337ab7425` 还原。此类「一方整体重写、另一方无冲突但被覆盖」是合并中最易漏检的一类。
+
+修复上游迁移遗留的 3 处路径缺陷（否则预览不可用）：`apps/web/scripts/shared-profile-features.mjs` 的 `feature.directory` 改为从仓库根 `new URL('../../../', import.meta.url)` 解析；`install-preview.mjs` 的 feature 目录补 `../../` 前缀，并把 Profile 路径恢复为 `join(home,'profiles/preview')`（上游误用 `'../../profiles/preview'`，而 `home` 即 `DSH_HOME`）；`start-preview.mjs`、`probe-activity.mjs` 同步恢复。
+
+自有启动器 `scripts/start-preview-local.sh` 在重构后失效（从根跑 pnpm、从根 `node_modules` 解析 CLI），已重定向到 `apps/web`。保留其不可替代的两点：全新机器引导（上游 `start-preview.mjs` 在 `preview:install` 未迁移 CLI 前直接拒绝启动，无法作为 clone 后的第一条命令）与 dsh 版本一致性守卫；同时保留 `dsh-app-boot` 软链——该包的 `bootstrapIncludes` 为模块级 WeakMap，Profile 侧若非同一物理文件，设置写入会报 “profile reload requires the root Include entry”。实际启动动作交回上游脚本，避免同一逻辑两处实现。
+
+迁移完整性已按交付回归门核对：CI 工作目录全部为 `working-directory: apps/web`，包测试以 `../../packages/**/tests/*.test.mjs` 执行，`pages.yml` 部署 `apps/web/website`，根级 `scripts/` 引用仅剩 Desktop 载体脚本（符合 yarn 定位）；`corepack pnpm check:plan` 通过（35 模块 / 15 需求）；`workdsh-bundle` build 与 typecheck 通过；`preview:install` 成功安装 14 个 bundle；HAOWISE 品牌在明暗两主题下均实测正确（页签标题、侧栏 mark 24px `#1F5FA0`、wordmark 正常加载、hero mark 34px、0 个旧图标）。
+
+未完成与已知缺陷：**`AT3000_latest` 尚未推送**，本机无 PAT、无 `gh`、无 credential helper，推送被凭据阻塞（需用户提供新令牌；此前会话中暴露过的令牌应吊销，本文件不记录任何凭据）。上游 `workdsh-plugin-office` typecheck 失败于 `src/client.tsx:52,54,59`（`techflag` 提交 `ae5c5c8374` 加入 CSV/XLSX，而 `workdshLibraryPreview.register` 类型仍为 `readonly ("pptx"|"docx")[]`），属上游回归，本次同步分支只报告不修改。新增的 `packages/providers/browser-session` 在 Web 预览激活失败（`electronExecutable` 未定义，Desktop 专用），对应此前的 `/api/workdsh-browser-session` 404。compaction 在真实 `contextWindow 65536` 下仍然失效：`dsh-web-app/cordis.patch.yml:488` 默认禁用 `compaction-basic` 与 `command-compact`，而 `applyEntryPatches` 的 `buildMap(data)` 仅在补丁循环前执行一次、且只递归 `group: true` 条目，故嵌套于 `preset-standard` config 数组中的 id 不可达（`dsp-app-boot/index.js:55-105`）；按默认值 `pressureBudget = (65536−16384)−65536 = −16384` 恒抛错，需 `contextWindow ≥ 98304` 或上游修复。网关 `api/main.py` 上游错误体透传修复仍仅在磁盘、未重启验证。
