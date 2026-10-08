@@ -1,19 +1,22 @@
 {
   "name": "workdsh-provider-identity-local",
-  "version": "0.1.0-alpha.6",
+  "version": "0.1.0-alpha.7",
   "private": true,
   "type": "module",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    }
+    },
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
   },
   "files": [
     "dist",
     "README.md",
     "CHANGELOG.md",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "locale/*.json"
   ],
   "dsh": {
     "bundle": {
@@ -29,13 +32,14 @@
     "zod": "4.4.3"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "4.0.3",
-    "@deepseek-ai/dsh-storage-domain": "0.1.7-alpha.1"
+    "@deepseek-ai/cordis": "4.0.4",
+    "@deepseek-ai/dsh-storage-domain": "0.2.0-rc.2"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "4.0.3",
-    "@deepseek-ai/dsh-storage-domain": "0.1.7-alpha.1",
+    "@deepseek-ai/cordis": "4.0.4",
+    "@deepseek-ai/dsh-storage-domain": "0.2.0-rc.2",
     "@types/node": "22.19.0",
     "workdsh-contracts": "workspace:*"
-  }
+  },
+  "description": "Provides trusted local identity and personal workspace ownership."
 }

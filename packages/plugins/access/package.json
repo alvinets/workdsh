@@ -1,6 +1,6 @@
 {
   "name": "workdsh-plugin-access",
-  "version": "0.1.0-alpha.6",
+  "version": "0.1.0-alpha.7",
   "private": true,
   "type": "module",
   "exports": {
@@ -15,13 +15,16 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    }
+    },
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
   },
   "files": [
     "cordis.patch.yml",
     "dist",
     "README.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "locale/*.json"
   ],
   "dsh": {
     "bundle": {
@@ -36,19 +39,31 @@
     "zod": "4.4.3"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "4.0.3",
-    "@deepseek-ai/dsh-api-session-controller": "0.1.7-alpha.1",
-    "@deepseek-ai/dsh-storage-domain": "0.1.7-alpha.1",
-    "@deepseek-ai/dsh-session": "0.1.7-alpha.1",
-    "@deepseek-ai/dsh-tools": "0.1.7-alpha.1"
+    "@deepseek-ai/cordis": "4.0.4",
+    "@deepseek-ai/dsh-api-session-controller": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-session": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-storage-domain": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.0-rc.2"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "4.0.3",
-    "@deepseek-ai/dsh-api-session-controller": "0.1.7-alpha.1",
-    "@deepseek-ai/dsh-storage-domain": "0.1.7-alpha.1",
+    "@deepseek-ai/cordis": "4.0.4",
+    "@deepseek-ai/dsh-api-session-controller": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-session": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-storage-domain": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.0-rc.2",
     "@types/node": "22.19.0",
-    "@deepseek-ai/dsh-session": "0.1.7-alpha.1",
-    "@deepseek-ai/dsh-tools": "0.1.7-alpha.1",
     "workdsh-contracts": "workspace:*"
+  },
+  "description": "Controls access to local resources, sessions and tools.",
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-session-title": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tool-fs": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tool-present": {
+      "optional": true
+    }
   }
 }
