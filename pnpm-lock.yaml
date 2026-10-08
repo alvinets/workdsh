@@ -402,12 +402,6 @@ importers:
       '@deepseek-ai/dsh-experimental-computer-use-cua-driver-native':
         specifier: 0.1.7-alpha.1
         version: 0.1.7-alpha.1(00fa4322a6e33bd0b3f68a41642f812d)
-      workdsh-plugin-library:
-        specifier: workspace:*
-        version: link:../plugins/library
-      workdsh-plugin-projects:
-        specifier: workspace:*
-        version: link:../plugins/projects
       yaml:
         specifier: 2.9.0
         version: 2.9.0
