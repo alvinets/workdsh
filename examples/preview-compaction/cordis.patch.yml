@@ -1,0 +1,25 @@
+# 预览 Profile 的 compaction 配置（合并进 cordis.patch.yml）
+#
+# 取值必须按后端真实能力填写。推导见 README.md。
+# 上游默认 headroomTokens = 65536 是绝对值；当 contextWindow 也是 65536 时
+# pressureBudget 恒为负，压缩必定被跳过。这不是 Profile 写法问题。
+
+# dsh-web-app 默认关闭这两个插件：默认关闭时没有按压式压缩，也没有溢出补救，
+# 会话一路增长到 n_ctx 后把 CONTEXT_WINDOW_EXCEEDED 交给调用方。
+- id: compaction-basic
+  name: '@deepseek-ai/dsh-compaction-basic'
+  disabled: false
+  config:
+    # 必须小于 messageBudget = contextWindow − maxTokens，否则无压力预算。
+    headroomTokens: 8192
+    # 必须显式写。不设置时取 ?? headroomTokens，而它是摘要请求的输出预算：
+    # 阈值处摘要请求为 prefix(40960) + 输出(4096) = 45056，需小于后端 65536。
+    maxTokens: 4096
+    thresholdRatio: 0.8
+    # 溢出补救是唯一能救回已越过 n_ctx 的路径，默认 1 次过少。
+    maxOverflowRetries: 3
+
+# 保留人工 /compact 逃生口。
+- id: command-compact
+  name: '@deepseek-ai/dsh-command-compact'
+  disabled: false
