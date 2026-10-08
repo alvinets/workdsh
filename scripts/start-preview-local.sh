@@ -25,7 +25,10 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKDSH_DIR="$SCRIPT_DIR/.."
 WEB_DIR="$WORKDSH_DIR/apps/web"
-PREVIEW_HOME="$WEB_DIR/.test-runtime/preview"
+# Must honour the same override start-preview.mjs and install-preview.mjs honour.
+# Otherwise setting it would version-check and link app-boot against one profile
+# while the actual spawn ran against another.
+PREVIEW_HOME="${WORKDSH_PREVIEW_HOME:-$WEB_DIR/.test-runtime/preview}"
 PROFILE_DIR="$PREVIEW_HOME/profiles/preview"
 LOG_DIR="$PREVIEW_HOME/logs"
 export WORKDSH_PREVIEW_PORT=${WORKDSH_PREVIEW_PORT:-18989}
