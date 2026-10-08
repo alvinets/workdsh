@@ -35,7 +35,7 @@ await mkdir(home, { recursive: true }); await mkdir(artifacts, { recursive: true
 const tarballs = [];
 const packages = [];
 const shared = await sharedProfileFeatures();
-for (const directory of ['../../packages/providers/identity-local', '../../packages/providers/browser-session', '../../packages/plugins/audit', '../../packages/plugins/access', ...shared.features.map(feature => feature.directory), '../../packages/plugins/activity', '../../packages/bundle']) {
+for (const directory of ['../../packages/providers/identity-local', '../../packages/providers/browser-session', '../../packages/plugins/audit', '../../packages/plugins/access', ...shared.features.map(feature => `../../${feature.directory}`), '../../packages/plugins/activity', '../../packages/bundle']) {
   const manifest = JSON.parse(await readFile(join(root, directory, 'package.json'), 'utf8'));
   await access(join(root, directory, manifest.exports['.'].default));
   await run('pnpm/bin/pnpm.cjs', ['--filter', manifest.name, 'pack', '--pack-destination', artifacts]);
