@@ -1,3 +1,9 @@
+# The official brand package registers the DeepSeek mark and name. It documents no
+# brand configuration surface, so the only composition route is to retire it and
+# occupy the same slots — done in src/client/harness/client.ts.
+- id: ui-brand-official
+  disabled: true
+
 - insert:
     - id: workdsh-installation-probe
       name: workdsh-bundle
