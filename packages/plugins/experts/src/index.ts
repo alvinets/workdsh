@@ -6,7 +6,7 @@ import { Context } from '@deepseek-ai/cordis';
 import type {} from '@deepseek-ai/dsh-skill';
 import type {} from '@deepseek-ai/dsh-client-connection';
 import type {} from '@deepseek-ai/dsh-tools';
-import { ExpertsManager } from './services/experts-manager.js';
+import { ExpertsManager, type ExpertsManagerOptions } from './services/experts-manager.js';
 import { registerExpertsConnection } from './services/connection-api.js';
 import { registerExpertManagementTools } from './tools/management-tools.js';
 import { registerExpertExecutionGuard } from './runtime/execution-guard.js';
@@ -14,6 +14,7 @@ import { registerExpertExecutionGuard } from './runtime/execution-guard.js';
 export * from './services/experts-manager.js';
 export * from './services/connection-api.js';
 export * from './tools/management-tools.js';
+export * from './runtime/execution-guard.js';
 
 /**
  * Host plugin entry for WorkDSH experts (D04 / P1-02, expert module 0.1).
@@ -58,19 +59,19 @@ export function registerExpertManagerSkill(ctx: Context): () => void {
     ...expertManagerSkillMeta,
     source: 'bundled',
     content: expertManagerSkillContent,
-    resourceBase: { kind: 'directory', path: fileURLToPath(new URL('../resources/skills/workdsh-expert-manager/', import.meta.url)) },
+    resourceBase: { kind: 'directory', path: fileURLToPath(new URL('../resources/skills/workdsh-expert-manager', import.meta.url)) },
   });
 }
 
 /** Independent Host apply: own service, transport, tools and bundled skill. */
-export async function applyExpertsHost(ctx: Context): Promise<void> {
-  await ctx.plugin(ExpertsManager);
-  await ctx.plugin({ name: 'workdsh-experts-integration', inject: [...inject, 'workdshExperts'], apply: applyIntegration });
+export async function applyExpertsHost(ctx: Context, options: ExpertsManagerOptions = {}): Promise<void> {
+  await ctx.plugin(ExpertsManager, options);
+  await ctx.plugin({ name: 'workdsh-experts-integration', inject: [...inject, 'workdshExperts'], apply: (host: Context) => applyIntegration(host, options) });
 }
 
 /** The consumer declares the services provided by the manager child Fibers. */
-function applyIntegration(ctx: Context): void {
-  registerExpertExecutionGuard(ctx);
+function applyIntegration(ctx: Context, options: ExpertsManagerOptions = {}): void {
+  registerExpertExecutionGuard(ctx, options);
   registerExpertsConnection(ctx);
   registerExpertManagementTools(ctx);
   ctx.effect(() => registerExpertManagerSkill(ctx));

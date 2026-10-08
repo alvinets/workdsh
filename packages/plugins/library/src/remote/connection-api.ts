@@ -1,16 +1,10 @@
-import { randomUUID } from 'node:crypto';
 import type { Context } from '@deepseek-ai/cordis';
 import type { ConnectionRpcResult, HostConnectionHandle } from '@deepseek-ai/dsh-client-connection';
-import type { ActorContext } from 'workdsh-contracts';
 
 export const libraryManagementPath = '/api/workdsh-library';
 const ok = <T>(value: T): ConnectionRpcResult<T> => ({ ok: true, value });
 const fail = (code: string, message: string): ConnectionRpcResult<never> => ({ ok: false, error: { code, message, details: {} } });
 const record = (value: unknown): Record<string, unknown> | undefined => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
-const actor = (ctx: Context): ActorContext => {
-  const profile = ctx.workdshIdentity.profile();
-  return { principalId: profile.principalId, organizationId: profile.organization.id, requestId: `library-ui-${randomUUID()}`, resolvedBy: profile.resolvedBy };
-};
 
 export function registerLibraryConnection(ctx: Context): void {
   const connection = (ctx as Context & { connection: HostConnectionHandle }).connection;
@@ -19,7 +13,7 @@ export function registerLibraryConnection(ctx: Context): void {
     fetch: async request => {
       try {
         const body = record(await request.json()); const endpoint = body?.endpoint; const payload = record(body?.payload) ?? {};
-        const current = actor(ctx); const manager = ctx.workdshLibrary;
+        const current = await ctx.workdshIdentity.resolve(undefined, request.signal); const manager = ctx.workdshLibrary;
         if (endpoint === 'space') return Response.json(ok(await manager.space(current, request.signal)));
         if (endpoint === 'list' && (payload.parentId === undefined || typeof payload.parentId === 'string')) return Response.json(ok(await manager.list(current, payload.parentId as string | undefined, request.signal)));
         if (endpoint === 'create-folder' && typeof payload.name === 'string' && (payload.parentId === undefined || typeof payload.parentId === 'string')) return Response.json(ok(await manager.createFolder(current, payload.name, payload.parentId as string | undefined, request.signal)));
@@ -45,7 +39,7 @@ export function registerLibraryConnection(ctx: Context): void {
         return Response.json(fail('library/invalid-request', '资料库请求无效。'), { status: 400 });
       } catch (cause) {
         const code = cause instanceof Error && cause.message.startsWith('library/') ? cause.message : 'library/internal';
-        const messages: Record<string, string> = { 'library/not-found': '资料不存在或无权访问。', 'library/disabled': '资料已停用，不能读取、检索或添加到任务。', 'library/name-conflict': '同一目录已有同名项目。', 'library/unsupported-format': '当前仅支持 Markdown、TXT、PDF、DOCX、PPTX 和 HTML。', 'library/file-size': '文件为空或超过限制。', 'library/cycle': '文件夹不能移动到自己的子目录。', 'library/invalid-name': '资料名称无效。', 'library/revision-conflict': '草稿已被更新，请刷新后重试。', 'library/base-revision-conflict': '正文已有新版本，请重新创建草稿。', 'library/draft-format': '第一版只支持修改 Markdown 和 TXT。', 'library/selection-too-large': '所选目录资料过多，请缩小范围。', 'library/invalid-text': '文本不是有效的 UTF-8。', 'library/invalid-pdf': 'PDF 已损坏或格式与扩展名不符。', 'library/invalid-office-file': 'Office 文件已损坏或格式与扩展名不符。', 'library/invalid-docx': '文件不是有效的 DOCX。', 'library/invalid-pptx': '文件不是有效的 PPTX。', 'library/invalid-html': '文件不是有效的 HTML。', 'library/archive-limit': 'Office 文件解压规模或压缩比超过安全限制。', 'library/archive-path': 'Office 文件包含不安全的归档路径。' };
+        const messages: Record<string, string> = { 'library/not-found': '资料不存在或无权访问。', 'library/disabled': '资料已停用，不能读取、检索或添加到任务。', 'library/name-conflict': '同一目录已有同名项目。', 'library/unsupported-format': '当前仅支持 Markdown、TXT、PDF、DOCX、PPTX、HTML、CSV 和 XLSX。', 'library/file-size': '文件为空或超过限制。', 'library/cycle': '文件夹不能移动到自己的子目录。', 'library/invalid-name': '资料名称无效。', 'library/revision-conflict': '草稿已被更新，请刷新后重试。', 'library/base-revision-conflict': '正文已有新版本，请重新创建草稿。', 'library/draft-format': '第一版只支持修改 Markdown 和 TXT。', 'library/selection-too-large': '所选目录资料过多，请缩小范围。', 'library/invalid-csv': 'CSV 包含二进制内容，无法作为表格导入。', 'library/invalid-xlsx': 'XLSX 已损坏或格式与扩展名不符。', 'library/invalid-text': '文本不是有效的 UTF-8。', 'library/invalid-pdf': 'PDF 已损坏或格式与扩展名不符。', 'library/invalid-office-file': 'Office 文件已损坏或格式与扩展名不符。', 'library/invalid-docx': '文件不是有效的 DOCX。', 'library/invalid-pptx': '文件不是有效的 PPTX。', 'library/invalid-html': '文件不是有效的 HTML。', 'library/archive-limit': 'Office 文件解压规模或压缩比超过安全限制。', 'library/archive-path': 'Office 文件包含不安全的归档路径。' };
         return Response.json(fail(code, messages[code] ?? '资料库操作失败。'), { status: code === 'library/internal' ? 500 : 400 });
       }
     },
