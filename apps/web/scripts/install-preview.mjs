@@ -69,6 +69,29 @@ if (normalizedManifest) {
 // existing preview Profile may have been created by an older DSH release; its
 // bundle list alone does not upgrade the packages that provide newly added Web
 // surfaces such as Terminal and archived-session recovery.
+// dshmarket mounts every dependency that is absent from dsh.profile.bundles,
+// treating it as client-only and hot-mounting it against the package root.
+// browser-session is intentionally absent from that list because
+// workdsh-bundle's patch inserts it, and that absence is precisely what marks
+// it client-only, so the market mounts dist/index.js -- the Host module --
+// where the executable guard rejects it and the entry fails on every boot.
+// Naming the package in the Profile's own patch layer is the market's
+// documented escape (patchLayerManages, upstream issue #58). The row repeats
+// the bundle's env gate rather than hardcoding disabled, so Desktop still
+// activates the provider when it supplies an executable.
+const previewPatchPath = join(home, 'profiles/preview/cordis.patch.yml');
+const browserSessionClaim = [
+  '- id: workdsh-browser-session',
+  '  name: workdsh-provider-browser-session',
+  '  disabled: !!js "!process.env.DSH_ELECTRON_EXECUTABLE && !process.env.DSH_BROWSER_EXECUTABLE"',
+].join('\n');
+const currentPatch = await readFile(previewPatchPath, 'utf8').catch(() => '');
+if (!currentPatch.includes('workdsh-provider-browser-session')) {
+  const kept = currentPatch.replace(/\[\s*\]\s*$/, '').trimEnd();
+  const body = kept === '' || kept.startsWith('#') && !kept.includes('\n-') ? [] : kept.split('\n');
+  await writeFile(previewPatchPath, `${[...body, browserSessionClaim].join('\n')}\n`);
+  console.log('Claimed workdsh-provider-browser-session in the preview patch layer to stop dshmarket shimming the Host module.');
+}
 const currentDependencies = JSON.parse(await readFile(previewManifestPath, 'utf8')).dependencies ?? {};
 const layersMatch = currentDependencies['@deepseek-ai/dsh-base'] === baseVersion
   && currentDependencies['@deepseek-ai/dsh-web-app'] === webAppVersion
