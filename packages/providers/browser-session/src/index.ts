@@ -61,7 +61,7 @@ const TOOL_PREFIX = `mcp__${MCP_NAME}__`;
 const RESOURCE_TOOLS = new Set(['list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource']);
 
 /** Register only for future Agent activations; existing sessions keep their original provider. */
-export function apply(ctx: Context, config: Config): void {
+export function apply(ctx: Context, config: Config = {}): void {
   if (!config.electronExecutable?.trim() && !config.executablePath?.trim()) {
     throw new Error('workdsh-browser-session: Electron worker or browser executable is required');
   }

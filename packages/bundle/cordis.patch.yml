@@ -22,9 +22,14 @@
         executablePath: !!js "process.env.DSH_BROWSER_EXECUTABLE ?? (process.platform === 'darwin' ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : undefined)"
     - id: workdsh-browser-session
       name: workdsh-provider-browser-session
-      disabled: !!js "!process.env.DSH_ELECTRON_EXECUTABLE"
+      # Either executable satisfies the provider: electronExecutable is the
+      # Desktop worker, executablePath the documented Web-only fallback. Gating
+      # on Electron alone left the Web preview activating an entry that could
+      # never satisfy its own guard.
+      disabled: !!js "!process.env.DSH_ELECTRON_EXECUTABLE && !process.env.DSH_BROWSER_EXECUTABLE"
       config:
         electronExecutable: !!js "process.env.DSH_ELECTRON_EXECUTABLE"
+        executablePath: !!js "process.env.DSH_BROWSER_EXECUTABLE"
     - id: auto-review
       name: '@deepseek-ai/dsh-experimental-auto-review'
 - id: ui-sidebar-browser
