@@ -19,8 +19,12 @@
           - id: your-model-id
             name: your-model-id
             # 必须小于后端真实上下文（本例后端 n_ctx 为 65536）。
+            # 如实申报真实值：声明偏小会连带压低 maxTokens 的可用空间。
             contextWindow: 49152
-            # 必须显著小于 contextWindow，否则 messageBudget 为 0。
+            # 双重身份：既是输入预留（messageBudget = contextWindow − maxTokens），
+            # 也是逐请求输出上限。必须显著小于 contextWindow，否则 messageBudget 为 0；
+            # 调得过小则长文生成被输出上限截断，且输出截断不会被 compaction 补救。
+            # 长文生成任务应改为按真实上下文申报并调高，见 README.md 的取舍表。
             maxTokens: 8192
 
 # headroomTokens 默认 65536，会超过上面模型的整个消息预算，导致按压式
