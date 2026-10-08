@@ -1,3 +1,134 @@
+## 2026-10-08：启用被上游默认关闭的 compaction（配置投递仍未解决，阻塞）
+
+长任务（`/workdsh-web-design create a web game mastermind`）在 65,536 上下文上
+溢出失败。取证会话 `session-02f55a54…`（223 条记录，07:32→08:15）：输入从 57,180
+单调增长到 65,471，29 个 step 期间**从未发生过一次 summarize compaction**，下一请求
+67,795 直接 `CONTEXT_WINDOW_EXCEEDED`。日志中仅有的 2 条 `compaction/prune` 来自
+`dsh-compaction-tool-result-pruner`（`lib/index.js:159` 自行 append），与 compaction
+无关，不能用来证明其运行。
+
+**根因（已确认）**：`@deepseek-ai/dsh-web-app/cordis.patch.yml:488` 默认
+`id: compaction-basic / disabled: true`（`command-compact` 同样）。该 Profile 因此
+**完全没有 compaction**：既无按压式主动压缩，也无溢出补救，也没有人工 `/compact`。
+此前本 Profile 写在 `compaction-basic` 上的 config 一直作用在被禁用的插件上。
+
+**已修复并验证**：
+- Profile 覆盖 `disabled: false`，`compaction-basic` 与 `command-compact` 均生效：
+  `command-compact ... waiting for service: compaction` 告警消失（该告警仅在
+  `compaction` 服务缺失时出现），且能读到压缩引擎的运行期错误。
+- 新增 `packages/bundle/src/probe.ts` 的环境变量开关日志镜像。本 Profile 未安装任何
+  console exporter（只有需要 collector URL 的 OTLP），`ctx.logger.warn` 全部不可见。
+  开启后立即暴露了三个此前完全不可见的问题：压缩的 `TargetPressureConfigError`、
+  模型 401、以及本次改动自身引入的配置回归。开启方式 `WORKDSH_DEBUG_LOG=<path>`，
+  默认 `$DSH_HOME/logs/workdsh-debug.log`。
+
+**仍阻塞（未解决）**：**`compaction-basic` 的 `config` 无法投递给真正运行的引擎**。
+运行中的引擎嵌套在 `- id: preset-standard` 的 config 数组里（经 `compaction` group，
+该 group 带 `isolate: {compaction: true}`），而 `dsh-app-boot` 的 `applyEntryPatches`
+里 `buildMap(data)` **在 patch 循环之前只执行一次**，且仅递归 `entry.group &&
+Array.isArray(entry.config)` 的条目。`preset-standard` 没有 `group: true`，因此其内部
+所有 id 都不可寻址：`- id: compaction` 报 `entry not found`；顶层
+`- id: compaction-basic` 只会改到根级那一份（web-app 的 `disabled: true` 行），而
+真正运行的嵌套实例仍取默认值。先用非法值 `headroomTokens: "banana"` 验证过投递边界：
+根级实例确实收到（报 `expected number but got banana`），嵌套实例不发声，两者是
+不同实例。尝试过给 `preset-standard` 加 `group: true` 让映射可递归，但 `buildMap`
+早已跑完，无效。
+
+结果：运行中的引擎恒取默认（`headroomTokens` 65536、`maxTokens` 因
+`?? headroomTokens` 亦为 65536，见 `lib/index.js:64`），而
+`pressureBudget = (contextWindow − reserved) − headroom`，默认 headroom 65536 下
+`contextWindow` 需 ≥ 98304 才有正压力预算；且默认摘要输出预算 65536 也要求
+`contextWindow` 足够大。故在 `contextWindow: 65536` 的真实上限下，**上游默认
+compaction 配置在数学上不可能工作**，这不是本 Profile 的配置问题。
+
+**两条可行路径（待用户选择，均需重启 LLM 服务或继续改代码）**：
+1. 把 `llama-server` 的 `-c` 从 65536 提到 131072（systemd unit 原本就写着
+   `-c 262144`，是当前运行实例被以 65536 启动），并如实申报
+   `contextWindow: 131072`。此时上游默认配置即可成立：
+   messageBudget 114688、pressureBudget 49152、threshold 49152、retain 18350，
+   摘要请求 prefix+65536 也装得下。内存可行：`llama-server` 当前 RSS 仅 1.3GB
+   （权重在 NPU），机器 62GB 总、31GB 可用。代价是重启 LLM 会中断推理。
+2. 不动服务端，改为压低 token 增长：实现 HTML 片段编辑（消除
+   `html.replaceDocument` 的 O(n²)），并裁掉 59 个 `cua_driver_native` 工具
+   （每次请求约 29K schema）。属于代码工作，不需中断服务。
+
+**期间修复的自身回归**：批量改写 Profile 时误删了 `agent-default-model` 行，导致无
+默认模型、请求落到别的提供方并报 `401 Authentication Fails, Your api key: 123 is
+invalid`。已恢复并验证对话可用。
+
+**后端状态（已核实）**：`llama-server` 17701 存活且 `-c 65536`（与配置一致）、
+`haowise_gateway` 18000 存活，`/v1/models` 与 `/v1/chat/completions` 直连与经网关
+均返回 200。用户轨迹中 07:32 的「Connection error」与 08:15 的溢出是两个独立问题。
+
+**未执行**：真实长任务端到端复跑（受上述配置投递阻塞，压缩仍不可用）；未提交、未推送。
+
+## 2026-10-08：content_edit 补齐 HTML 操作说明，修正首次调用误选（P1-12 关联）
+
+模型首次提交 HTML 网页时把 `content_edit` 的 `operations` 误判为 Word 变体，报
+`expected "html.replaceDocument"` / `html: expected string` / `Unrecognized keys:
+blockId, expectedText, block`，第二次即成功。
+
+**根因不是幻觉，是选错 union 成员**。`document.replaceBlock` 是同一 union 中真实存在的
+Word 操作（`content/tools.ts:109-147`，字段恰为 `op`/`blockId`/`expectedText`/`block`），
+模型逐字段照抄。`content_edit` 的工具描述原本只讲 Word/PPT/Excel，完全没有提
+`html.replaceDocument`；该 op 只出现在机器可读的 `const`、`content_open` 描述的括号、
+系统提示 `htmlGuide` 与 web-design 技能里。且 HTML 是 union 中唯一的整体替换成员，
+其余全是块/单元格/页/幻灯片的增量操作，没有可套用的形状。请求体本身也不带 `kind`，
+服务端按文档已存 kind 分派校验（`content/service.ts:451,540`），模型只能靠上下文记忆。
+
+**修复（仅改描述，不动 schema）**：`content_edit` 描述改为先说明「合法操作取决于
+content_open/content_read 返回的 kind，而请求不含 kind 字段」，再逐 kind 列出映射；
+HTML 明确写「每次调用恰好一个操作、整体替换文档、保留既有样式与脚本、不得只发片段」，
+并显式禁止对 HTML 发送 `blockId`/`expectedText`/`block`。同时消除「最多 4 个操作」与
+HTML `.length(1)` 的矛盾：4 个上限改为只归属 Word。
+
+`htmlEditInput`（`html/model.ts`）保持 `.strict()` 与 `.length(1)` 不变，校验强度未放宽。
+
+**已验证**：`workdsh-plugin-office` typecheck 与 build 通过；构建产物 `dist/index.js`
+含新描述、旧措辞已消失；`preview:install` 通过 13/13 bundle 载入断言，装入 profile 的
+`workdsh-plugin-office/dist/index.js` 同样含新描述。`check-plan` 仍只报既有的
+`packages/plugins/experts/resources/skills/expert-manager` 缺失，与本次无关。
+
+**未执行**：真实模型重跑同一提示以确认不再误选（需实际 Agent 会话）；多文档类型回归；
+未提交、未推送。
+
+## 2026-10-08：HAOWISE 品牌标识、标签页标题与 favicon（P1-12）
+
+侧栏标识、会话 Hero 标识、侧栏文字标、浏览器标签页标题与 favicon 全部改为 HAOWISE。
+仅改品牌呈现，不涉及模型路由、数据与业务功能。
+
+**关键发现**：WorkDSH 原本已占用 `sidebar.brand.mark` 与 `sidebar.brand.name`
+（`packages/bundle/src/client/harness/client.ts`，`priority: -10`，渲染 `workdsh-ui` 的
+`LogoMark` 与文本 “WorkDSH”）。因此这是在既有品牌上换标，不是给无品牌外壳加标。已在
+原属主处替换，未新增插件，避免出现第二套品牌真源。
+
+- `src/client/components/Brand.tsx`：`BrandName` 返回 HAOWISE 文字标（PNG），`BrandMark`
+  与新增 `HeroBrandMark` 返回同一 Λ 单色标记（`viewBox 0 0 23.16 17.04`，`#1F5FA0`，
+  与官方鱼标记同 viewBox，宽度定尺寸的调用方布局不变）。
+- `src/client/components/DocumentHead.ts`：标题与 favicon 只能在运行时改写。标题源自
+  `process.env.DSH_CLIENT_TITLE` 的构建期内联值（发布件固定为 “DeepSeek Harness”），
+  favicon 位于 pnpm 硬链接的预构建 `dsh-web-frontend/dist/index.html`，两者都无官方
+  扩展面。标题用 `MutationObserver` 只替换产品名子串，保留官方会话标题行为并收敛。
+- `cordis.patch.yml`：新增 `ui-brand-official disabled: true`。官方 README 明确
+  “there is no brand configuration surface here”，占用 Slot 是唯一组合途径。
+
+**资源**：`assets/haowise-wordmark.png` 由参考实现 786×208、139KB（却以 `height:24px`
+展示，超采样约 8.7 倍）缩放并量化到 363×96、5,870 字节，位图比对确认无可见劣化。参考
+profile 的 `HW_LIGHT`/`HW_DARK` 逐字节相同（sha256 `ae6426e9…`），其亮暗切换 CSS 实为
+空操作，故只保留一份并用内联样式。client 代码由 `tsc` 编译（无 Vite），无法 import 图片，
+沿用官方 client 插件做法内联 data URI，由 `scripts/generate-wordmark.mjs` 生成。
+
+**已验证**：`preview:install` 通过其 13/13 bundle 载入断言；`--dump-config` 显示
+`ui-brand-official disabled: true`；Playwright 明暗两套主题下侧栏 Λ 24px + 文字标 24px
+（`naturalWidth>0`）、Hero Λ 34px、标题 `HAOWISE`、两个 `link[rel=icon]` 均为品牌
+data URI 且无残留 `.svg` 鱼图标；标题观察器对 `Quarterly review — …` 与中文会话名均
+正确改写为 `… — HAOWISE`；控制台零错误。`check-plan` 与 bundle/ui typecheck 通过。
+
+**未执行**：全量业务回归；真实用户浏览器（非 headless）目视；`workdsh-ui` 的 `LogoMark`
+现已无引用，属遗留死代码，本次未删除。`check-plan` 仍报既有的
+`packages/plugins/experts/resources/skills/expert-manager` 缺失，与本次改动无关。
+未提交、未推送。
+
 ## 2026-09-23：alpha.8 发布准备
 
 中英文 README 去重并更新完整应用截图与安装说明。整包补齐项目/资料库，固定 Harness 0.1.7、pnpm、原生构建配置和官方必需peer。全仓构建/typecheck、集成112项，后续安装器5项、专家20项回归通过。11包隔离安装、重装、冷启动及项目/资料库浏览器冒烟通过；273个DSH模块版本一致。旧专家显式重新发布路径通过，真实旧用户数据未自动迁移。当前等待GitHub登录以完成远端发布。详见 [发布审查](evidence/release-alpha8-review.md) 和 [更新说明](releases/v0.1.0-alpha.8.md)。
@@ -1588,6 +1719,7 @@ D00 设计修订完成，当前 D01 集成验证进行中。已安装并锁定�
 | P1-09 | 团队基础实现 | P1 | completed |
 | P1-10 | 企业管理后台基础入口 | P1 | todo |
 | P1-11 | 项目配置、待办、任务、资产与交接 | P1 | in_progress |
+| P1-12 | HAOWISE 品牌标识、标签页标题与 favicon | P1 | in_progress |
 | P2-01 | 专家团模型及执行映射 | P2 | todo |
 | P2-02 | 专家团失败与取消 | P2 | todo |
 | P2-03 | 自动化配置与调度 | P2 | todo |

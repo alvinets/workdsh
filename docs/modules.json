@@ -525,5 +525,23 @@
       "evidence": "docs/releases/2026-09-15-dsh-0.1.6-alpha.1.md"
     },
     "acceptanceNote": "官方 Team 协作栏布局与状态投影已验证；60 分钟资源收敛和跨平台长任务仍未验收。"
+  },
+  {
+    "path": "examples/local-llm-provider",
+    "title": "本地 OpenAI 兼容提供方示例",
+    "phase": "P0",
+    "task": "P0-02",
+    "status": "planned",
+    "directories": [],
+    "acceptanceNote": "Profile patch 与预算算术说明；非可执行包，仅示例配置。"
+  },
+  {
+    "path": "examples/preview-compaction",
+    "title": "预览 Profile 的 compaction 配置示例",
+    "phase": "P1",
+    "task": "P1-12",
+    "status": "planned",
+    "directories": [],
+    "acceptanceNote": "说明预算推导与上游默认 headroomTokens 固定绝对值导致的无解情形；非可执行包。配置尚未投递到运行实例，端到端未执行。"
   }
 ]
