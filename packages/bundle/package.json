@@ -41,7 +41,7 @@
     }
   },
   "scripts": {
-    "build": "corepack pnpm --filter workdsh-ui build && corepack pnpm --filter workdsh-plugin-workbench build && tsc -p tsconfig.json && node ../../scripts/build-client-probe.mjs",
+    "build": "node ../../scripts/generate-wordmark.mjs && corepack pnpm --filter workdsh-ui build && corepack pnpm --filter workdsh-plugin-workbench build && tsc -p tsconfig.json && node ../../scripts/build-client-probe.mjs",
     "typecheck": "corepack pnpm --filter workdsh-ui build && corepack pnpm --filter workdsh-plugin-workbench typecheck && tsc -p tsconfig.json --noEmit"
   },
   "peerDependencies": {

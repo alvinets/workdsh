@@ -4,8 +4,9 @@ import type {} from '@deepseek-ai/dsh-api-remotes/client';
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client';
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client';
 import * as workbench from 'workdsh-plugin-workbench';
-import { BrandMark, BrandName, DiagnosticsMark } from '../components/Brand.js';
+import { BrandMark, BrandName, DiagnosticsMark, HeroBrandMark } from '../components/Brand.js';
 import { DiagnosticsPanel, type Inventory } from '../components/DiagnosticsPanel.js';
+import { installDocumentHead } from '../components/DocumentHead.js';
 import { NavigationLocation } from '../components/NavigationLocation.js';
 
 export const name = 'workdsh-client';
@@ -35,6 +36,10 @@ export function apply(ctx: Context): void {
   ctx.plugin(workbench);
   ctx.slots.inject('sidebar.brand.name', () => ctx.slots.register({ name: 'sidebar.brand.name', priority: -10 }, BrandName));
   ctx.slots.inject('sidebar.brand.mark', () => ctx.slots.register({ name: 'sidebar.brand.mark', priority: -10 }, BrandMark));
+  // The conversation hero has no Workbench occupant; the official brand package is
+  // disabled in the bundle patch, so this is the only mark registered for it.
+  ctx.slots.inject('conversation.hero.brand.mark', () => ctx.slots.register({ name: 'conversation.hero.brand.mark', priority: -10 }, HeroBrandMark));
+  ctx.effect(() => installDocumentHead(), 'workdshBundle.documentHead');
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({
     name: 'shell.overlay', id: 'workdsh-location', inject: () => ({ panelToView, selectView }),
   }, NavigationLocation));
