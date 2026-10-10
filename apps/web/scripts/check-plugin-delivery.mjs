@@ -37,12 +37,19 @@ const visited=new Set(), edges=[];
 const visit=name=>{
  if(visited.has(name))return;visited.add(name);
  const row=manifests.get(name);assert.ok(row,'Owned package must have a manifest: '+name);
- // Also inspect build dependencies: bundled Client code can carry workspace-only modules.
- for(const field of ['dependencies','optionalDependencies','peerDependencies','devDependencies'])for(const dependency of Object.keys(row.manifest[field]??{})){
-  if(!dependency.startsWith('workdsh-'))continue;
-  assert.ok(allowed.has(dependency),'Default package closure contains an external feature: '+name+' -> '+dependency);
-  edges.push({from:name,to:dependency,field});visit(dependency);
- }
+// Also inspect build dependencies: bundled Client code can carry workspace-only modules.
+  // A package may list a devDependency under `workdshBuildInlined` when its build
+  // inlines that module into its own artifact, leaving no runtime reference. Scope
+  // this to devDependencies deliberately: the same package in `dependencies` would
+  // activate that feature inside a personal Profile and must still fail the audit.
+  const inlined=row.manifest.workdshBuildInlined??[];
+  for(const field of ['dependencies','optionalDependencies','peerDependencies','devDependencies'])for(const dependency of Object.keys(row.manifest[field]??{})){
+   if(!dependency.startsWith('workdsh-'))continue;
+   const inlinedAtBuild=field==='devDependencies'&&inlined.includes(dependency);
+   assert.ok(inlinedAtBuild||allowed.has(dependency),'Default package closure contains an external feature: '+name+' -> '+dependency);
+   if(inlinedAtBuild){edges.push({from:name,to:dependency,field,inlinedAtBuild:true});continue;}
+   edges.push({from:name,to:dependency,field});visit(dependency);
+  }
 };
 for(const name of defaults)visit(name);
 return {visited,edges};
