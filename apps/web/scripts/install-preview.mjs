@@ -19,6 +19,10 @@ const baseSpec = `@deepseek-ai/dsh-base@${baseVersion}`;
 const webAppSpec = `@deepseek-ai/dsh-web-app@${webAppVersion}`;
 const marketVersion = '1.66.8';
 const marketSpec = `dshmarket@${marketVersion}`;
+// Keyless web search backend. Third-party (MIT), pinned like dshmarket so a
+// Profile install is reproducible rather than tracking latest.
+const searxngVersion = '0.5.1';
+const searxngSpec = `dsh-web-search-searxng@${searxngVersion}`;
 const cliVersion = JSON.parse(await readFile(join(root, 'node_modules/@deepseek-ai/dsh/package.json'), 'utf8')).version;
 if (cliVersion !== baseVersion) throw new Error('Preview CLI and Base must use the same pinned version.');
 const home = resolve(process.env.WORKDSH_PREVIEW_HOME ?? join(root, '.test-runtime/preview'));
@@ -80,25 +84,58 @@ if (normalizedManifest) {
 // the bundle's env gate rather than hardcoding disabled, so Desktop still
 // activates the provider when it supplies an executable.
 const previewPatchPath = join(home, 'profiles/preview/cordis.patch.yml');
-const browserSessionClaim = [
-  '- id: workdsh-browser-session',
-  '  name: workdsh-provider-browser-session',
-  '  disabled: !!js "!process.env.DSH_ELECTRON_EXECUTABLE && !process.env.DSH_BROWSER_EXECUTABLE"',
-].join('\n');
+// Both rows belong in the Profile's own patch layer because dsh applies it AFTER
+// every bundle layer, and a patch replaces the target row's whole config — so a
+// row written here is the only place that can override what a bundle set.
+//
+// workdsh-provider-browser-session: naming the package is what stops dshmarket
+// shimming it. mountClientOnlyDeps mounts every dependency missing from
+// dsh.profile.bundles, and browser-session is missing on purpose because
+// workdsh-bundle's patch inserts it. That absence is exactly what marks it
+// client-only, so the market would mount its Host module, whose executable
+// guard rejects it and the entry fails on every boot.
+//
+// web: dsh-web-search-searxng's own bundle patch pins `searchProvider: searxng`
+// unconditionally, and a pinned provider that reports unavailable makes the seam
+// throw WEB_PROVIDER_CONFIGURED_UNAVAILABLE instead of falling back — verified:
+// that breaks search for anyone without a SearXNG instance even when they have
+// DEEPSEEK_API_KEY. Select SearXNG only when an instance is configured.
+const previewRows = [
+  {
+    marker: 'workdsh-provider-browser-session',
+    note: 'Claimed workdsh-provider-browser-session in the preview patch layer to stop dshmarket shimming the Host module.',
+    yml: [
+      '- id: workdsh-browser-session',
+      '  name: workdsh-provider-browser-session',
+      '  disabled: !!js "!process.env.DSH_ELECTRON_EXECUTABLE && !process.env.DSH_BROWSER_EXECUTABLE"',
+    ],
+  },
+  {
+    marker: 'searchProvider',
+    note: 'Pinned the SearXNG web search provider only when SEARXNG_URL configures an instance.',
+    yml: [
+      '- id: web',
+      '  config:',
+      '    searchProvider: !!js "process.env.SEARXNG_URL ? \'searxng\' : \'deepseek-official\'"',
+    ],
+  },
+];
 const currentPatch = await readFile(previewPatchPath, 'utf8').catch(() => '');
-if (!currentPatch.includes('workdsh-provider-browser-session')) {
+const missingRows = previewRows.filter(({ marker }) => !currentPatch.includes(marker));
+if (missingRows.length > 0) {
   const kept = currentPatch.replace(/\[\s*\]\s*$/, '').trimEnd();
   const body = kept === '' || kept.startsWith('#') && !kept.includes('\n-') ? [] : kept.split('\n');
-  await writeFile(previewPatchPath, `${[...body, browserSessionClaim].join('\n')}\n`);
-  console.log('Claimed workdsh-provider-browser-session in the preview patch layer to stop dshmarket shimming the Host module.');
+  await writeFile(previewPatchPath, `${[...body, ...missingRows.flatMap(({ yml }) => yml)].join('\n')}\n`);
+  for (const { note } of missingRows) console.log(note);
 }
 const currentDependencies = JSON.parse(await readFile(previewManifestPath, 'utf8')).dependencies ?? {};
 const layersMatch = currentDependencies['@deepseek-ai/dsh-base'] === baseVersion
   && currentDependencies['@deepseek-ai/dsh-web-app'] === webAppVersion
   && currentDependencies.dshmarket === marketVersion
+  && currentDependencies['dsh-web-search-searxng'] === searxngVersion
   && packages.every(({ manifest }, index) => currentDependencies[manifest.name] === `file:${tarballs[index]}`);
 if (!layersMatch) {
-  await run('@deepseek-ai/dsh/lib/bin.js', ['plugin', '--profile', 'preview', 'add', baseSpec, webAppSpec, marketSpec, ...tarballs]);
+  await run('@deepseek-ai/dsh/lib/bin.js', ['plugin', '--profile', 'preview', 'add', baseSpec, webAppSpec, marketSpec, searxngSpec, ...tarballs]);
 }
 // Boot and ConfigEditor share module-local registration in dsh-app-boot.
 // Keep the official CLI in the Profile dependency graph as well: launching the
