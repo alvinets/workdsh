@@ -17,6 +17,8 @@ metadata:
 3. 利用用户主题、材料、风格和场景，只问决定内容的缺失信息，一次最多三个问题。按需阅读 [需求对齐](references/human-alignment.md) 的优先级；未指定具体风格时，按需求对齐流程调用 `content_preview_styles` 展示四套封面，再用官方 `ask_user_question` 等待选择。只指定“红色”时展示四种红色方向，不自动套用红金；明确红金政务时才读取 [红金设计](references/designs/design-principle.redgold.md)。选定后重新打开步骤1的原生 presentation documentId，保留首张页面与用户编辑。
 4. 阅读 [叙事方法](references/story-principle.md) 和 [视觉设计](references/design-principle.md)，提炼逐页主题、来源、重点、版式、配色与节奏。咨询或学术场景按需读取 designs 下对应资料。将这些方法应用到实时编辑器；不强制创建 STORY.md、DESIGN.md、.slide 或脚本。材料缺失的数据保留明确待补项，不添加虚构事实。
 5. 按实际原生 schema 制作：`presentation.insertSlides/updateSlide` 每次 content_edit 只提交一页内容；使用返回的 revision、稳定 slideId、元素 ID。updateSlide 的 elements 替换整页元素，须保留用户未要求删除的内容。根据实际画布缩放设计参考的1280×720布局，不硬编码画布大小；不使用 CSS、JSX 或 SlideDSL 属性。
+
+   文字元素只写原生扁平字段：`{id, type:"text", x, y, width, height, text:"整段文字", fontSize, color, bold}`，多行用 `\n`，需要分段样式再加 `textSegments`（每段 `{text, style}`）。`text` 必须是非空字符串。禁止使用 Word 文档编辑器的 `paragraphs`/`runs`/`marks` 结构——那是 Word 的形状，原生 PPT 不识别，写入后整段文字会被静默丢弃，页面只剩标题。常见形状用 `type:"rectangle"` 加 `fill`/`stroke`，不要用文字元素冒充色块。提交前自检每个 `type:"text"` 元素都带非空 `text`。
 6. 原生图表使用 chartData 的 chartType、categories、series[{name,values}]，保持数据可编辑；不要以图片或形状拼装代替实际图表。图片只使用支持的真实素材，不构造图片字节。新建、替换、排序、删除均使用实际 content_capabilities 支持的操作。遇到 revision 冲突先重读，HUMAN_EDITING 时等待用户完成编辑，不循环重试。
 7. 逐页检查边界、文字溢出、图表可读性、母版对齐、章节对应、配色和材料忠实度。完成后读取最新保存版本，调用 `content_export` 导出真实 PPTX 并显示文件交付卡；工具不可用时说明右侧下载方式和未验证项，不声称已经导出。
 

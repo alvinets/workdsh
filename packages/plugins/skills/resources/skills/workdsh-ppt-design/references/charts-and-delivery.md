@@ -2,6 +2,20 @@
 
 使用当前原生图表，保持数据和样式可编辑。能力返回画布、元素字段和支持图表类型才是参数依据，腾讯 Chart JSX 是不同引擎，不可提交。
 
+## 原生元素形状
+
+元素是扁平记录，字段名固定。先 `content_read` 看真实页面已有元素的字段，再照同样形状写。
+
+| 用途 | 形状 |
+| --- | --- |
+| 文字 | `{id, type:"text", x, y, width, height, text:"整段文字", fontSize, color, bold}`；换行用 `\n`；分段样式再加 `textSegments:[{text, style}]` |
+| 色块/线条 | `{id, type:"rectangle", x, y, width, height, fill:"#RRGGBB", stroke:"#RRGGBB"}` |
+| 图表 | `{id, type:"chart", x, y, width, height, chartData:{chartType, categories, series:[{name,values}]}}` |
+
+`x/y/width/height` 是画布内的左上角 CSS 像素，四个必须同时给且都在画布内；`fontSize` 是磅值，不是画布坐标。`type:"text"` 必须带非空 `text` 字符串。
+
+不要提交 Word 的 `paragraphs`/`runs`/`marks`：那是文档编辑器的结构，原生 PPT 不识别，文字会被整段丢弃，只剩标题，看起来像“没有提交成功”。也不要用 `type:"text"` 冒充色块。提交前逐个确认每个 `type:"text"` 都带非空 `text`。
+
 | 数据目的 | 选型 |
 | --- | --- |
 | 时间趋势 | line，时间顺序与间隔明确 |
