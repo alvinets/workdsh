@@ -64,6 +64,12 @@ const ops=z.discriminatedUnion('op',[
 ]);
 function validateAuthoredElements(elements:readonly Record<string,unknown>[],dimensions:NativeDeck['canvas']){
  for(const element of elements){
+  // The native writer drops keys it does not model, so a Word paragraphs/runs
+  // text element would commit as a blank slide instead of failing.
+  if(element.type==='text'&&(typeof element.text!=='string'||!element.text.length))
+   throw new OfficeError('INVALID_INPUT',element.paragraphs===undefined&&element.runs===undefined
+    ?'PPT 文字元素必须提供非空 text 字符串。'
+    :'PPT 文字元素不支持 Word 的 paragraphs/runs 结构，请改用原生 text 字符串与 textSegments。');
   const values=['x','y','width','height'].map(key=>element[key]);
   if(values.every(value=>value===undefined))continue;
   if(!values.every(value=>typeof value==='number'&&Number.isFinite(value)))throw new OfficeError('INVALID_INPUT','PPT 元素坐标必须同时提供有限的 x、y、width、height。');
