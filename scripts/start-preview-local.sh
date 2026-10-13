@@ -40,10 +40,14 @@ die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 [ -d "$WEB_DIR" ] || die "apps/web not found; this launcher expects the apps/web layout"
 
 # ── stop any previous instance ────────────────────────────────────────────────
-pkill -9 -f "dsh.*--profile preview" 2>/dev/null
-pkill -9 -f "dsh/bin.js.*--profile preview" 2>/dev/null
-pkill -9 -f "start-preview[.]mjs" 2>/dev/null
-sleep 2
+# Skippable: the two spaces run side by side on separate DSH_HOMEs, and this
+# sweep is a single-instance restart that would kill whichever is already up.
+if [ "${WORKDSH_PREVIEW_KEEP_RUNNING:-0}" != "1" ]; then
+    pkill -9 -f "dsh.*--profile preview" 2>/dev/null
+    pkill -9 -f "dsh/bin.js.*--profile preview" 2>/dev/null
+    pkill -9 -f "start-preview[.]mjs" 2>/dev/null
+    sleep 2
+fi
 
 # ── workspace dependencies (the CLI comes from here) ───────────────────────────
 if [ ! -d "$WEB_DIR/node_modules" ]; then
