@@ -7,6 +7,11 @@ import { documentDocx } from "../live/docx.js";
 import { parsePresentation } from "../presentation/native-deck.js";
 import { createHash } from "node:crypto";
 /** Binary writes travel through the official bash policy pipeline, never bare Host fs. */
+const sessionCwd=(exec:ToolRunContext)=>exec.agent?.session?.header?.cwd;
+const detail=(result:{content?:readonly {type:string;text?:string}[]})=>{
+  const text=(result.content??[]).filter(b=>b.type==="text").map(b=>b.text??"").join("").trim();
+  return text?` 执行器输出：${text.slice(0,500)}`:"";
+};
 export async function exportAndPresent(
   ctx: Context,
   exec: ToolRunContext,
@@ -69,14 +74,17 @@ export async function exportAndPresent(
     exec.signal.throwIfAborted();
     let write;
     try { write = await ctx.tools.execute({
-      name:"bash",arguments:{command,description:`Export current document as ${format}${commands.length>1?` (${index+1}/${commands.length})`:""}`,timeoutMs:30000},
+      name:"bash",arguments:{command,description:`Export current document as ${format}${commands.length>1?` (${index+1}/${commands.length})`:""}`,timeoutMs:30000,...sessionCwd(exec)!==undefined?{workdir:sessionCwd(exec)}:{}},
       callId:`${exec.callId}:office-write${index?`-${index}`:""}` as typeof exec.callId,
       rootCallId:exec.rootCallId,parent:exec.token,agent:exec.agent,signal:exec.signal,
     }); } catch {
       throw new Error(`${format} 写入结果未知：${path}。未交付文件；重试 content_export 时使用同一 documentId 和 baseRevision ${snapshot.revision}，先核对已有文件，不覆盖原件。`);
     }
     for(const context of write.additionalContexts??[])exec.deferContext(context);
-    if(write.isError||!write.content.some(b=>b.type==="text"&&b.text.includes(marker)))throw new Error(`${format} 文件写入失败、被策略拒绝或结果未知，未交付文件。目标 ${path}；可使用同一修订 ${snapshot.revision} 重试导出并核对已有文件，或使用右侧下载。`);
+    if(write.isError||!write.content.some(b=>b.type==="text"&&b.text.includes(marker)))
+     // Carry the executor's own output: the generic line alone made a silent
+     // write failure indistinguishable from a policy denial or a bad result.
+     throw new Error(`${format} 文件写入失败、被策略拒绝或结果未知，未交付文件。目标 ${path}；可使用同一修订 ${snapshot.revision} 重试导出并核对已有文件，或使用右侧下载。${detail(write)}`);
   }
   exec.signal.throwIfAborted();
   let present;

@@ -560,6 +560,11 @@ test('Native PPT shares native tools, pending/ACK, CAS, human leases, ownership 
   await h.s.acknowledge(actor(),{documentId:first.documentId,requestId:request.requestId,clientId:'ppt-client',appliedRevision:0});
   const batch={documentId:first.documentId,baseRevision:0,operationId:'ppt-add-slide',operations:[{op:'presentation.insertSlides',afterSlideId:first.state.deck.slides.at(-1).id,slides:[{id:'new-action-slide',slideNumber:2,elements:[],name:'行动建议'}]}]};
   await assert.rejects(h.s.editForAgent(actor(),{...batch,operationId:'out-of-canvas',operations:[{op:'presentation.insertSlides',afterSlideId:first.state.deck.slides.at(-1).id,slides:[{id:'bad-slide',slideNumber:2,elements:[{id:'bad',type:'text',x:1200,y:40,width:160,height:40,text:'越界'}]}]}]}),/1280×720/);
+  // A text element authored with the Word paragraphs/runs shape carries no text.
+  // The native PPTX writer drops unknown keys, so the slide would commit with a
+  // title and silently blank body. Reject it and name the accepted shape.
+  await assert.rejects(h.s.editForAgent(actor(),{...batch,operationId:'word-shape-rejected',operations:[{op:'presentation.insertSlides',afterSlideId:first.state.deck.slides.at(-1).id,slides:[{id:'word-shape-slide',slideNumber:2,elements:[{id:'s-2',type:'text',x:80,y:160,width:1120,height:45,paragraphs:[{type:'paragraph',runs:[{text:'vLLM',marks:['bold']}]}]}]}]}]}),/text/);
+  await assert.rejects(h.s.editForAgent(actor(),{...batch,operationId:'empty-text-rejected',operations:[{op:'presentation.insertSlides',afterSlideId:first.state.deck.slides.at(-1).id,slides:[{id:'empty-text-slide',slideNumber:2,elements:[{id:'s-3',type:'text',x:80,y:160,width:1120,height:45,text:''}]}]}]}),/text/);
   await assert.rejects(h.s.editForAgent(actor(),{...batch,operationId:'multi-page-rejected',operations:[{...batch.operations[0],slides:[...batch.operations[0].slides,{id:'second-content-page',slideNumber:3,elements:[]}]}]}),{code:'INVALID_INPUT'});
   assert.equal((await h.s.read(actor(),first.documentId)).revision,0);
   const receipt=await h.ctx.tools.get('content_edit').execute({input:batch},exec);assert.equal(receipt.revision,1);
@@ -623,6 +628,40 @@ test("PPT export delivers committed native bytes, retries safely and rejects cha
     await writeFile(join(home,first.path),"changed");
     await assert.rejects(()=>exportAndPresent(ctx,exec,snapshot,3),/未交付文件/);
     assert.equal(await readFile(join(home,first.path),"utf8"),"changed");
+  }finally{await rm(home,{recursive:true,force:true});}
+});
+
+
+test("PPT export writes into the session workspace and reports the real bash failure",async()=>{
+  const {exportAndPresent}=await import(new URL("export.js",artifacts));
+  const {createPresentation}=await import(new URL("native-deck.js",artifacts));
+  const {execFile}=await import("node:child_process");
+  const {promisify}=await import("node:util");
+  const {readFile}=await import("node:fs/promises");
+  const home=await mkdtemp(join(tmpdir(),"office-ppt-export-cwd-"));
+  const deck=await createPresentation("交付目录");
+  const snapshot={documentId:"ppt-export-cwd",kind:"presentation",title:"交付目录",revision:1,state:{deck},generation:"test"};
+  // A bash mock that honours the workdir it is given, so a caller that omits
+  // workdir lands wherever the executor default points instead of the session.
+  const sessionCwd=join(home,"session-workspace");
+  await mkdir(sessionCwd,{recursive:true});
+  const bashCalls=[];
+  const makeCtx=(behaviour)=>({tools:{get:()=>true,execute:async input=>{
+    if(input.name!=="bash")return {content:[]};
+    bashCalls.push(input);
+    if(behaviour==="fail")return {isError:true,content:[{type:"text",text:"EACCES: permission denied, open 'output/x.pptx'"}]};
+    try{const {stdout}=await promisify(execFile)(process.execPath,["-e",input.arguments.command.slice(9,-1)],{cwd:input.arguments.workdir??process.cwd()});return {content:[{type:"text",text:stdout}]};}
+    catch(error){return {isError:true,content:[{type:"text",text:String(error.stderr||error.message)}]};}
+  }}});
+  const exec={agent:{session:{header:{cwd:sessionCwd}}},signal:new AbortController().signal,callId:"export-cwd",deferContext:()=>{}};
+  try{
+    const first=await exportAndPresent(makeCtx("ok"),exec,snapshot,1);
+    // The delivered file must land in the session workspace, not a process cwd.
+    assert.equal(first.path.startsWith("output/"),true);
+    assert.deepEqual(await readFile(join(sessionCwd,first.path)),Buffer.from(deck.bytes,"base64"));
+    assert.equal(bashCalls[0].arguments.workdir,sessionCwd);
+    // A failed write must surface the executor's own stderr, not only a generic line.
+    await assert.rejects(()=>exportAndPresent(makeCtx("fail"),exec,snapshot,1),/EACCES/);
   }finally{await rm(home,{recursive:true,force:true});}
 });
 
