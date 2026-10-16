@@ -10,6 +10,7 @@ import { registerSkillLifecycleTools } from './services/lifecycle-tools.js';
 
 export * from './services/manager.js';
 export * from './shared.js';
+export * from './skillhub.js';
 export { registerSkillManagementConnection } from './services/connection-api.js';
 export { registerSkillLifecycleTools } from './services/lifecycle-tools.js';
 
