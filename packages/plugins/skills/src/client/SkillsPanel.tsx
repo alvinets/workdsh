@@ -8,6 +8,7 @@ import type { SkillTaskKind } from './drafts.js';
 import type { SkillManagementClient } from './management.js';
 import { ImportSkillModal } from './ImportSkillModal.js';
 import { SkillHubPanel } from './SkillHubPanel.js';
+import { probeSkillHub } from '../skillhub.js';
 import { skillsActionsCss, skillsCss, skillsMarketCss } from './styles.js';
 
 type SkillsPanelInjected = {
@@ -72,6 +73,14 @@ export function SkillsPanel({ toggleNavigation, management, startSkillTask, star
   const [confirmBatchUninstall, setConfirmBatchUninstall] = useState(false);
   const [view, setView] = useState<'market' | 'installed'>('market');
   const [marketSource, setMarketSource] = useState<'local' | 'skillhub'>('local');
+  const [skillHubReady, setSkillHubReady] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+    void probeSkillHub(document.baseURI, controller.signal).then(ready => { if (active) setSkillHubReady(ready); });
+    return () => { active = false; controller.abort(); };
+  }, []);
   const [installedQuery, setInstalledQuery] = useState('');
   const search = useRef<HTMLInputElement>(null);
   const addMenu = useRef<HTMLDivElement>(null);
@@ -268,8 +277,8 @@ export function SkillsPanel({ toggleNavigation, management, startSkillTask, star
       <div className="add-menu-wrap" ref={addMenu}><Button variant="primary" className="add-skill" disabled={creating} aria-haspopup="menu" aria-expanded={addMenuOpen} onClick={() => setAddMenuOpen(open => !open)}>＋ 添加技能</Button>{addMenuOpen && <div className="add-menu" role="menu"><button role="menuitem" onClick={() => { setAddMenuOpen(false); search.current?.focus(); }}>查找技能</button><button role="menuitem" onClick={() => { setAddMenuOpen(false); setImportOpen(true); }}>上传技能</button><button role="menuitem" onClick={() => void beginSkillTask('create')}>创建技能</button></div>}</div>
     </header>
     <div className="section-head"><h1>技能市场</h1><Button className="refresh" onClick={() => void refresh()} disabled={busy}>刷新</Button></div>
-    <nav className="skill-source-tabs" aria-label="技能来源"><button className={marketSource === 'local' ? 'active' : ''} aria-current={marketSource === 'local' ? 'page' : undefined} onClick={() => setMarketSource('local')}>本地技能</button><button className={marketSource === 'skillhub' ? 'active' : ''} aria-current={marketSource === 'skillhub' ? 'page' : undefined} onClick={() => setMarketSource('skillhub')}>SkillHub</button></nav>
-    {marketSource === 'skillhub' ? <SkillHubPanel query={query} onInstalled={refresh} onOpenInstalled={openInstalled} /> : <>
+        <nav className="skill-source-tabs" aria-label="技能来源"><button className={marketSource === 'local' ? 'active' : ''} aria-current={marketSource === 'local' ? 'page' : undefined} onClick={() => setMarketSource('local')}>本地技能</button>{skillHubReady && <button className={marketSource === 'skillhub' ? 'active' : ''} aria-current={marketSource === 'skillhub' ? 'page' : undefined} onClick={() => setMarketSource('skillhub')}>SkillHub</button>}</nav>
+    {marketSource === 'skillhub' && skillHubReady ? <SkillHubPanel query={query} onInstalled={refresh} onOpenInstalled={openInstalled} /> : <>
     <nav className="category-tabs" aria-label="技能分类"><button className={selectedCategory === ALL ? 'active' : ''} aria-current={selectedCategory === ALL ? 'page' : undefined} onClick={() => setCategory(ALL)}>全部</button>{categories.map(label => <button key={label} className={selectedCategory === label ? 'active' : ''} aria-current={selectedCategory === label ? 'page' : undefined} onClick={() => setCategory(current => current === label ? ALL : label)}>{label}</button>)}</nav>
     {catalog?.status === 'invalid' && <p className="catalog-note" role="note">技能目录暂时不可用，已安装的技能仍可使用。</p>}
     {batchMode && batchBar}

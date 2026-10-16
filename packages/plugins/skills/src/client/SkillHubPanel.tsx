@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { useEffect, useState } from 'react';
 import { Button } from 'workdsh-ui';
+import { callSkillHub } from '../skillhub.js';
 
 type SkillHubCard = {
   slug: string;
@@ -22,16 +23,8 @@ function SkillHubIcon({ card }: { card: SkillHubCard }) {
   return <span className="skillhub-icon" aria-hidden="true">{card.name.slice(0, 1).toUpperCase()}{iconUrl && <img src={iconUrl} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={event => { event.currentTarget.hidden = true; }} />}</span>;
 }
 
-async function skillHub<T extends { ok: boolean; error?: string }>(method: string, payload: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(new URL('./skillhub', document.baseURI), {
-    method: 'POST', credentials: 'same-origin',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ method, ...payload }), signal,
-  });
-  const result = await response.json() as T;
-  if (!response.ok || !result.ok) throw new Error(result.error || `SkillHub 请求失败 (${response.status})`);
-  return result;
-}
+const skillHub = <T extends { ok: boolean; error?: string }>(method: string, payload: Record<string, unknown> = {}, signal?: AbortSignal): Promise<T> =>
+  callSkillHub<T>(document.baseURI, method, payload, signal);
 
 /** Reuse the installed DSH plugin's search and verified installation path. */
 export function SkillHubPanel({ query, onInstalled, onOpenInstalled }: { query: string; onInstalled: () => Promise<void>; onOpenInstalled: () => void }) {
