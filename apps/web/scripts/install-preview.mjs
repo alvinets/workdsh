@@ -19,6 +19,8 @@ const baseSpec = `@deepseek-ai/dsh-base@${baseVersion}`;
 const webAppSpec = `@deepseek-ai/dsh-web-app@${webAppVersion}`;
 const marketVersion = '1.66.8';
 const marketSpec = `dshmarket@${marketVersion}`;
+const skillHubVersion = '0.2.16';
+const skillHubSpec = `@cocofhu/skillhub@${skillHubVersion}`;
 // Keyless web search backend. Third-party (MIT), pinned like dshmarket so a
 // Profile install is reproducible rather than tracking latest.
 const searxngVersion = '0.5.1';
@@ -132,10 +134,11 @@ const currentDependencies = JSON.parse(await readFile(previewManifestPath, 'utf8
 const layersMatch = currentDependencies['@deepseek-ai/dsh-base'] === baseVersion
   && currentDependencies['@deepseek-ai/dsh-web-app'] === webAppVersion
   && currentDependencies.dshmarket === marketVersion
+  && currentDependencies['@cocofhu/skillhub'] === skillHubVersion
   && currentDependencies['dsh-web-search-searxng'] === searxngVersion
   && packages.every(({ manifest }, index) => currentDependencies[manifest.name] === `file:${tarballs[index]}`);
 if (!layersMatch) {
-  await run('@deepseek-ai/dsh/lib/bin.js', ['plugin', '--profile', 'preview', 'add', baseSpec, webAppSpec, marketSpec, searxngSpec, ...tarballs]);
+  await run('@deepseek-ai/dsh/lib/bin.js', ['plugin', '--profile', 'preview', 'add', baseSpec, webAppSpec, marketSpec, skillHubSpec, searxngSpec, ...tarballs]);
 }
 // Boot and ConfigEditor share module-local registration in dsh-app-boot.
 // Keep the official CLI in the Profile dependency graph as well: launching the
