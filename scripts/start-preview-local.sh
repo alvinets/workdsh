@@ -34,6 +34,22 @@ LOG_DIR="$PREVIEW_HOME/logs"
 export WORKDSH_PREVIEW_PORT=${WORKDSH_PREVIEW_PORT:-18989}
 CLI="$WEB_DIR/node_modules/@deepseek-ai/dsh/lib/bin.js"
 
+# Locate node without relying on PATH. ./start.sh is run under sudo, whose PATH
+# has no node, so `node -e` failed and — because its stderr was discarded —
+# reported the misleading "cannot resolve @deepseek-ai/dsh-app-boot".
+NODE_BIN="$(command -v node || true)"
+if [ -z "$NODE_BIN" ]; then
+    for c in "$HOME"/.nvm/versions/node/v22.*/bin/node \
+             /home/kzhy/.nvm/versions/node/v22.*/bin/node \
+             /usr/local/bin/node /usr/local/miniforge3/bin/node /usr/bin/node; do
+        [ -x "$c" ] && { NODE_BIN="$c"; break; }
+    done
+fi
+if [ -z "$NODE_BIN" ]; then
+    die "no node binary found (PATH, nvm, or the usual system locations)"
+fi
+
+
 log() { printf '%s\n' "$*"; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
@@ -81,7 +97,7 @@ fi
 mkdir -p "$PROFILE_DIR" "$LOG_DIR"
 
 # ── share one app-boot module instance with the Profile ────────────────────────
-BOOT_TARGET=$(node -e "
+BOOT_TARGET=$("$NODE_BIN" -e "
 const {createRequire}=require('module');
 const {realpathSync}=require('fs');
 const r=createRequire(realpathSync('$CLI'));
@@ -102,4 +118,4 @@ fi
 # Hand the spawn itself to the workspace script so version parity, Profile
 # normalisation and child supervision stay owned in one place.
 log "Starting WorkDSH preview on port $WORKDSH_PREVIEW_PORT (dsh $WEB_DSH) ..."
-(cd "$WEB_DIR" && exec node scripts/start-preview.mjs)
+(cd "$WEB_DIR" && exec "$NODE_BIN" scripts/start-preview.mjs)
