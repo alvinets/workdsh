@@ -125,6 +125,19 @@
     ]
   },
   {
+    "path": "../../packages/plugins/tool-gates",
+    "title": "高级工具门控",
+    "status": "in_progress",
+    "directories": [
+      "src",
+      "tests"
+    ],
+    "moduleVersion": "0.1",
+    "requirements": [
+      "R06"
+    ]
+  },
+  {
     "path": "../../packages/plugins/applications",
     "title": "行业应用",
     "status": "planned",

@@ -28,6 +28,8 @@ export interface BrowserFrame {
 export interface BrowserSessionView {
   available(agent: Agent): boolean;
   active(agent: Agent): boolean;
+  setToolsEnabled(agent: Agent, enabled: boolean): Promise<void>;
+  toolsEnabled(agent: Agent): boolean;
   capture(agent: Agent, signal: AbortSignal): Promise<BrowserFrame>;
   click(agent: Agent, x: number, y: number, signal: AbortSignal): Promise<BrowserFrame>;
   type(agent: Agent, text: string, signal: AbortSignal): Promise<BrowserFrame>;
@@ -53,7 +55,9 @@ export interface Config {
 
 interface BrowserResource {
   browser: ManagedChromium;
-  scope: Scope;
+  disposeListener: () => void;
+  mcp?: Scope;
+  closed?: boolean;
 }
 
 const MCP_NAME = 'workdsh-playwright';
@@ -72,6 +76,8 @@ export function apply(ctx: Context, config: Config = {}): void {
   let resources!: SessionResources<BrowserResource>;
   const ready = new Set<Agent>();
   const active = new Set<Agent>();
+  const mcpReady = new Set<Agent>();
+  const mcpQueues = new Map<Agent, Promise<void>>();
   let stopping = false;
 
   const view = async (
@@ -98,9 +104,59 @@ export function apply(ctx: Context, config: Config = {}): void {
       };
     });
   };
+  const mountMcp = async (agent: Agent, browser: ManagedChromium): Promise<Scope> => {
+    const scope = createScope(ctx, agent);
+    try {
+      await scope.ctx.plugin(McpClient, McpClient.Config({
+        transport: 'stdio',
+        serverName: MCP_NAME,
+        command: process.execPath,
+        args: [cli, '--browser', 'chromium', '--cdp-endpoint', browser.endpoint],
+        env: scrubbedMcpEnv,
+        ...agent.session.header.cwd === undefined ? {} : { cwd: agent.session.header.cwd },
+        ...config.toolCallTimeoutMs === undefined ? {} : { toolCallTimeoutMs: config.toolCallTimeoutMs },
+        failOnStartupError: true,
+        reconnect: { enabled: false },
+      }));
+      return scope;
+    } catch (error) {
+      await scope.dispose();
+      throw error;
+    }
+  };
+
+  const setToolsEnabled = (agent: Agent, enabled: boolean): Promise<void> => {
+    const previous = mcpQueues.get(agent) ?? Promise.resolve();
+    const task = previous.catch(() => {}).then(async () => {
+      if (stopping || !resources) return;
+      let resource: BrowserResource;
+      try { resource = await resources.get(agent); }
+      catch { return; }
+      if (resource.closed) return;
+      if (enabled) {
+        if (resource.mcp !== undefined) return;
+        const mcp = await mountMcp(agent, resource.browser);
+        if (resource.closed) { await mcp.dispose(); return; }
+        resource.mcp = mcp;
+        mcpReady.add(agent);
+      } else if (resource.mcp !== undefined) {
+        const mcp = resource.mcp;
+        resource.mcp = undefined;
+        mcpReady.delete(agent);
+        await mcp.dispose();
+      }
+    });
+    mcpQueues.set(agent, task);
+    return task.finally(() => {
+      if (mcpQueues.get(agent) === task) mcpQueues.delete(agent);
+    });
+  };
+
   ctx.provide('workdshBrowserSession', {
     available: agent => !stopping && ready.has(agent) && resources.available(agent),
     active: agent => !stopping && active.has(agent) && resources.available(agent),
+    setToolsEnabled,
+    toolsEnabled: agent => !stopping && mcpReady.has(agent),
     capture: (agent, signal) => view(agent, signal),
     click: (agent, x, y, signal) => {
       if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x > 10_000 || y > 10_000) {
@@ -146,10 +202,9 @@ export function apply(ctx: Context, config: Config = {}): void {
         const browser = config.electronExecutable?.trim()
           ? await launchManagedElectron(config.electronExecutable, signal)
           : await launchManagedChromium(config.executablePath!, signal);
-        const scope = createScope(ctx, agent);
         try {
           signal.throwIfAborted();
-          scope.ctx.on('tools/execute', async (exec, next) => {
+          const disposeListener = agent.ctx.on('tools/execute', async (exec, next) => {
             if (!exec.name.startsWith(TOOL_PREFIX)) return next();
             if (exec.agent !== agent) {
               if (ctx.tools.get(exec.name, exec.agent) !== ctx.tools.get(exec.name, agent)) return next();
@@ -157,31 +212,27 @@ export function apply(ctx: Context, config: Config = {}): void {
             }
             return next();
           });
-          await scope.ctx.plugin(McpClient, McpClient.Config({
-            transport: 'stdio',
-            serverName: MCP_NAME,
-            command: process.execPath,
-            args: [cli, '--browser', 'chromium', '--cdp-endpoint', browser.endpoint],
-            env: scrubbedMcpEnv,
-            ...agent.session.header.cwd === undefined ? {} : { cwd: agent.session.header.cwd },
-            ...config.toolCallTimeoutMs === undefined ? {} : { toolCallTimeoutMs: config.toolCallTimeoutMs },
-            failOnStartupError: true,
-            reconnect: { enabled: false },
-          }));
+          const resource: BrowserResource = { browser, disposeListener };
           signal.throwIfAborted();
           return {
-            value: { browser, scope },
+            value: resource,
             async close() {
+              resource.closed = true;
               ready.delete(agent);
               active.delete(agent);
-              try { await scope.dispose(); }
-              finally { await browser.close(); }
+              mcpReady.delete(agent);
+              mcpQueues.delete(agent);
+              try { await resource.mcp?.dispose(); }
+              finally {
+                resource.mcp = undefined;
+                resource.disposeListener();
+                await browser.close();
+              }
             },
           };
         } catch (error) {
-          try { await scope.dispose(); }
-          finally { await browser.close(); }
-          throw error;
+          try { await browser.close(); }
+          finally { throw error; }
         }
       },
     });
@@ -196,7 +247,22 @@ export function apply(ctx: Context, config: Config = {}): void {
   ctx.on('agent/created', async ({ agent, signal }) => {
     await resources.get(agent, signal);
     ready.add(agent);
-    agent.ctx.effect(() => () => { ready.delete(agent); active.delete(agent); }, 'workdsh.browser.activation');
+    const gates = (ctx as unknown as {
+      get(name: string): { getSync(): { state: { browserTools: boolean } } } | undefined;
+    }).get('workdshToolGates');
+    let enabled = true;
+    try { enabled = gates?.getSync().state.browserTools ?? true; }
+    catch { enabled = true; }
+    if (enabled) {
+      await setToolsEnabled(agent, true).catch(error => {
+        ctx.logger.warn(`${MCP_NAME}: browser tool mount failed: ${String(error)}`);
+      });
+    }
+    agent.ctx.effect(() => () => {
+      ready.delete(agent);
+      active.delete(agent);
+      mcpReady.delete(agent);
+    }, 'workdsh.browser.activation');
   }, { prepend: true });
 
   ctx.on('tools/execute', async (exec, next) => {

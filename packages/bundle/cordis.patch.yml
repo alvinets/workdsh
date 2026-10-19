@@ -11,11 +11,18 @@
       name: '@deepseek-ai/dsh-computer-use'
     - id: computer-use-cua-driver-native
       name: '@deepseek-ai/dsh-experimental-computer-use-cua-driver-native'
+      # Experimental desktop computer-use (cua-driver-rs) registers 59 tool schemas,
+      # ~23K tokens or ~47% of the tool budget. Originally gated by
+      # WORKDSH_ENABLE_COMPUTER_USE; now always mounted so the workdsh-tool-gates
+      # plugin can mask it live via agent.ctx.tools.restrict().
     - id: browser-use
       name: '@deepseek-ai/dsh-browser-use'
     - id: browser-use-playwright-mcp
       name: '@deepseek-ai/dsh-experimental-browser-use-playwright-mcp'
-      disabled: !!js "!!process.env.DSH_ELECTRON_EXECUTABLE"
+      # Alternative provider, used only by the legacy WORKDSH_ENABLE_BROWSER_TOOLS
+      # opt-in. It registers the same browser-use provider as
+      # workdsh-browser-session, so the two must never mount together.
+      disabled: !!js "!!process.env.DSH_ELECTRON_EXECUTABLE || !!process.env.DSH_BROWSER_EXECUTABLE || !process.env.WORKDSH_ENABLE_BROWSER_TOOLS"
       config:
         mode: launch
         headless: true
@@ -145,6 +152,7 @@
             config:
               headroomTokens: 8192
               maxTokens: 4096
+              maxOverflowRetries: 3
           - id: command-compact
             name: '@deepseek-ai/dsh-command-compact'
           - id: tool-result-pruner
@@ -328,6 +336,7 @@
             config:
               headroomTokens: 8192
               maxTokens: 4096
+              maxOverflowRetries: 3
             name: '@deepseek-ai/dsh-compaction-basic'
           - id: command-compact
             name: '@deepseek-ai/dsh-command-compact'
@@ -514,6 +523,7 @@
             config:
               headroomTokens: 8192
               maxTokens: 4096
+              maxOverflowRetries: 3
             name: '@deepseek-ai/dsh-compaction-basic'
           - id: command-compact
             name: '@deepseek-ai/dsh-command-compact'

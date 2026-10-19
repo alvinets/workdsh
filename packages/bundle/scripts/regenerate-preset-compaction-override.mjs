@@ -102,7 +102,7 @@ function applyCompactionConfig(override, presetId) {
     // which is the idempotent case, not an upstream change.
     if (hasConfig) continue;
     const indent = ' '.repeat(nameLine.length - nameLine.trimStart().length);
-    out.push(`${indent}config:`, `${indent}  headroomTokens: 8192`, `${indent}  maxTokens: 4096`);
+    out.push(`${indent}config:`, `${indent}  headroomTokens: 8192`, `${indent}  maxTokens: 4096`, `${indent}  maxOverflowRetries: 3`);
   }
   if (found === 0) throw new Error(`${presetId} no longer mounts compaction-basic; upstream layout changed`);
   return out;
