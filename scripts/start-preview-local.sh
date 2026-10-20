@@ -31,6 +31,10 @@ WEB_DIR="$WORKDSH_DIR/apps/web"
 PREVIEW_HOME="${WORKDSH_PREVIEW_HOME:-$WEB_DIR/.test-runtime/preview}"
 PROFILE_DIR="$PREVIEW_HOME/profiles/preview"
 LOG_DIR="$PREVIEW_HOME/logs"
+# start-preview.mjs resolves the same override. Export it so the launcher's
+# version check, the app-boot symlink, and the spawned child all use one Home;
+# otherwise the child silently falls back to its own default.
+export WORKDSH_PREVIEW_HOME="$PREVIEW_HOME"
 export WORKDSH_PREVIEW_PORT=${WORKDSH_PREVIEW_PORT:-18989}
 CLI="$WEB_DIR/node_modules/@deepseek-ai/dsh/lib/bin.js"
 
