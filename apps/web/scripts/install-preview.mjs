@@ -8,6 +8,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { withoutRedundantAgentTeamProfile } from './preview-agent-team.mjs';
+import { previewHome as resolvePreviewHome } from './preview-home.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const rootManifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
@@ -25,9 +26,11 @@ const skillHubSpec = `@cocofhu/skillhub@${skillHubVersion}`;
 // Profile install is reproducible rather than tracking latest.
 const searxngVersion = '0.5.1';
 const searxngSpec = `dsh-web-search-searxng@${searxngVersion}`;
+const groupVersion = rootManifest.pnpm?.overrides?.['@deepseek-ai/cordis-plugin-group'];
+if (typeof groupVersion !== 'string') throw new Error('Missing exact Cordis group pin.');
 const cliVersion = JSON.parse(await readFile(join(root, 'node_modules/@deepseek-ai/dsh/package.json'), 'utf8')).version;
 if (cliVersion !== baseVersion) throw new Error('Preview CLI and Base must use the same pinned version.');
-const home = resolve(process.env.WORKDSH_PREVIEW_HOME ?? join(root, '.test-runtime/preview'));
+const home = resolvePreviewHome();
 const artifacts = join(root, '.artifacts');
 // pnpm includes local archive paths in its store index filename. Keep the
 // immutable archive path short even when this checkout is a nested worktree.
@@ -35,13 +38,27 @@ const previewPacks = resolve(process.env.WORKDSH_PREVIEW_PACKS_HOME ?? join(home
 const env = { ...process.env, DSH_HOME: home, DSH_AGENTS_HOME: process.env.DSH_AGENTS_HOME ?? join(home, 'agents'), npm_config_ignore_workspace_root_check: 'true', PATH: `${join(root, 'node_modules/.bin')}:${dirname(process.execPath)}:${process.env.PATH}` };
 const exec = promisify(execFile);
 const run = async (tool, args) => {
-  await exec(process.execPath, [join(root, 'node_modules', tool), ...args], { cwd: root, env, timeout: 600_000, maxBuffer: 8 * 1024 * 1024 });
+  const pending = exec(process.execPath, [join(root, 'node_modules', tool), ...args], { cwd: root, env, timeout: 600_000, maxBuffer: 8 * 1024 * 1024 });
+  // Print only package-manager counters; command/config output may contain private data.
+  let lastProgress = '', lastPrintedAt = 0, partial = '';
+  const observe = chunk => {
+    partial = (partial + chunk.toString()).slice(-16384);
+    const lines = partial.split(/\r?\n/); partial = lines.pop() ?? '';
+    for (const line of lines) {
+      if (!/^Progress: resolved \d+, reused \d+, downloaded \d+, added \d+(?:, done)?$/.test(line.trim())) continue;
+      lastProgress = line.trim();
+      if (Date.now() - lastPrintedAt >= 15000) { console.log(lastProgress); lastPrintedAt = Date.now(); }
+    }
+  };
+  pending.child.stdout?.on('data', observe);
+  try { await pending; }
+  finally { pending.child.stdout?.off('data', observe); if (lastProgress) console.log(lastProgress); }
 };
 await mkdir(home, { recursive: true }); await mkdir(artifacts, { recursive: true });
 const tarballs = [];
 const packages = [];
 const shared = await sharedProfileFeatures();
-for (const directory of ['../../packages/providers/identity-local', '../../packages/providers/browser-session', '../../packages/plugins/audit', '../../packages/plugins/access', ...shared.features.map(feature => `../../${feature.directory}`), '../../packages/plugins/activity', '../../packages/bundle']) {
+for (const directory of ['../../packages/providers/identity-local', '../../packages/providers/browser-session', '../../packages/plugins/audit', '../../packages/plugins/access', ...shared.features.map(feature => `../../${feature.directory}`), '../../packages/plugins/workbenches', '../../packages/plugins/quality-analysis', '../../packages/plugins/activity', '../../packages/bundle']) {
   const manifest = JSON.parse(await readFile(join(root, directory, 'package.json'), 'utf8'));
   await access(join(root, directory, manifest.exports['.'].default));
   await run('pnpm/bin/pnpm.cjs', ['--filter', manifest.name, 'pack', '--pack-destination', artifacts]);
@@ -149,8 +166,8 @@ const installedVersion = async (name) => {
   try { return JSON.parse(await readFile(join(home, 'profiles/preview/node_modules/@deepseek-ai', name, 'package.json'), 'utf8')).version; }
   catch (error) { if (error.code === 'ENOENT') return undefined; throw error; }
 };
-if (await installedVersion('dsh') !== cliVersion || await installedVersion('dsh-deepseek-account') !== cliVersion || await installedVersion('cordis-plugin-group') !== '1.0.4') {
-  await run('pnpm/bin/pnpm.cjs', ['--dir', join(home, 'profiles/preview'), 'add', '--save-exact', `@deepseek-ai/dsh@${cliVersion}`, `@deepseek-ai/dsh-deepseek-account@${cliVersion}`, '@deepseek-ai/cordis-plugin-group@1.0.4']);
+if (await installedVersion('dsh') !== cliVersion || await installedVersion('dsh-deepseek-account') !== cliVersion || await installedVersion('cordis-plugin-group') !== groupVersion) {
+  await run('pnpm/bin/pnpm.cjs', ['--dir', join(home, 'profiles/preview'), 'add', '--save-exact', `@deepseek-ai/dsh@${cliVersion}`, `@deepseek-ai/dsh-deepseek-account@${cliVersion}`, `@deepseek-ai/cordis-plugin-group@${groupVersion}`]);
 }
 // DSH Profiles disable automatic peer installation. A fresh preview must
 // install and upgrade the same official runtime peer closure as the release installer.
@@ -171,7 +188,8 @@ for (let pass = 0; pass < 9; pass++) {
       if (!name.startsWith('@deepseek-ai/') || manifest.peerDependenciesMeta?.[name]?.optional) continue;
       const actual = await installedVersion(name.slice('@deepseek-ai/'.length));
       const version = rootManifest.pnpm?.overrides?.[name] ?? (name.startsWith('@deepseek-ai/dsh-') ? baseVersion : range);
-      if (actual && (!name.startsWith('@deepseek-ai/dsh') || actual === version)) continue;
+      const locked = rootManifest.pnpm?.overrides?.[name] ?? (name.startsWith('@deepseek-ai/dsh') ? baseVersion : undefined);
+      if (actual && (locked === undefined || actual === locked)) continue;
       missing.set(name, `${name}@${version}`);
     }
   }
@@ -254,5 +272,18 @@ if (missingBundles.length > 0) {
     + `npm resolves its ^0.1.7-alpha.1 dependency range to a newer prerelease, and every bundle whose `
     + `peerDependencies do not satisfy that version is dropped without a diagnostic.`);
 }
-console.log('Installed Skill, Expert, Connector, Office, Library, Projects and WorkDSH presentation as separate official Profile layers.');
+// Preserve authentic CLI-installed workbench archives for Host verification.
+const archiveDirectory = join(profile, 'workdsh-bootstrap-archives');
+await mkdir(archiveDirectory, { recursive: true });
+const archiveEntries = [];
+for (const [index, { manifest }] of packages.entries()) {
+  const descriptor = manifest.workdsh?.workbench;
+  if (!descriptor) continue;
+  const fileName = `${manifest.name}-${manifest.version}.tgz`;
+  const bytes = await readFile(tarballs[index]);
+  await copyFile(tarballs[index], join(archiveDirectory, fileName));
+  archiveEntries.push({ fileName, packageName: manifest.name, version: manifest.version, workbenchId: descriptor.id, sha256: createHash('sha256').update(bytes).digest('hex') });
+}
+await writeFile(join(archiveDirectory, 'index.json'), JSON.stringify({ version: 1, entries: archiveEntries }, null, 2) + '\n');
+console.log('Installed Skill, Expert, Connector, Office, Library, Projects, Workbenches, Quality Analysis and WorkDSH presentation as separate official Profile layers.');
 console.log('Start the stopped preview with: corepack pnpm preview');

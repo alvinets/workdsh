@@ -14,6 +14,7 @@ import type {} from '@deepseek-ai/dsh-system-prompt';
 import { launchManagedChromium, type ManagedChromium } from './managed-chromium.js';
 import { launchManagedElectron } from './managed-electron.js';
 import { registerBrowserSessionConnection } from './remote.js';
+import { browserToolActivity, type BrowserToolActivity } from './tool-activity.js';
 
 /** A rendered view of the same page controlled by the Session's MCP tools. */
 export interface BrowserFrame {
@@ -28,6 +29,7 @@ export interface BrowserFrame {
 export interface BrowserSessionView {
   available(agent: Agent): boolean;
   active(agent: Agent): boolean;
+  revision(agent: Agent): number;
   setToolsEnabled(agent: Agent, enabled: boolean): Promise<void>;
   toolsEnabled(agent: Agent): boolean;
   capture(agent: Agent, signal: AbortSignal): Promise<BrowserFrame>;
@@ -48,6 +50,7 @@ export const inject = ['browserUse', 'agents', 'tools', 'systemPrompt'];
 export interface Config {
   /** Desktop reuses its own Electron Chromium in a private worker process. */
   electronExecutable?: string;
+  electronApplication?: string;
   /** Web-only fallback when Desktop's Electron worker is unavailable. */
   executablePath?: string;
   toolCallTimeoutMs?: number;
@@ -77,7 +80,13 @@ export function apply(ctx: Context, config: Config = {}): void {
   const active = new Set<Agent>();
   const mcpReady = new Set<Agent>();
   const mcpQueues = new Map<Agent, Promise<void>>();
+  const revisions = new Map<Agent, number>();
   let stopping = false;
+  const activity = (agent: Agent, value: BrowserToolActivity) => {
+    if (value === 'unchanged') return;
+    if (value === 'page') active.add(agent); else active.delete(agent);
+    revisions.set(agent, (revisions.get(agent) ?? 0) + 1);
+  };
 
   const view = async (
     agent: Agent,
@@ -85,6 +94,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     action?: (page: import('playwright-core').Page) => Promise<void>,
   ): Promise<BrowserFrame> => {
     if (stopping || !resources.available(agent)) throw new Error(`${MCP_NAME}: Session browser is unavailable`);
+    const revision = revisions.get(agent) ?? 0;
     return resources.run(agent, signal, async ({ browser }, combined) => {
       combined.throwIfAborted();
       const page = browser.context.pages().at(-1);
@@ -94,6 +104,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       const viewport = page.viewportSize();
       const jpeg = await page.screenshot({ type: 'jpeg', quality: 65, animations: 'disabled', timeout: 10_000 });
       combined.throwIfAborted();
+      if (action && (revisions.get(agent) ?? 0) === revision) activity(agent, 'page');
       return {
         url: page.url(),
         title: await page.title(),
@@ -159,6 +170,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   ctx.provide('workdshBrowserSession', {
     available: agent => !stopping && resources.available(agent),
     active: agent => !stopping && active.has(agent) && resources.available(agent),
+    revision: agent => revisions.get(agent) ?? 0,
     setToolsEnabled,
     toolsEnabled: agent => !stopping && mcpReady.has(agent),
     capture: (agent, signal) => view(agent, signal),
@@ -204,7 +216,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       exclusive: false,
       async open(agent, signal) {
         const browser = config.electronExecutable?.trim()
-          ? await launchManagedElectron(config.electronExecutable, signal)
+          ? await launchManagedElectron(config.electronExecutable, signal, config.electronApplication)
           : await launchManagedChromium(config.executablePath!, signal);
         try {
           signal.throwIfAborted();
@@ -225,6 +237,7 @@ export function apply(ctx: Context, config: Config = {}): void {
               active.delete(agent);
               mcpReady.delete(agent);
               mcpQueues.delete(agent);
+              revisions.delete(agent);
               try { await resource.mcp?.dispose(); }
               finally {
                 resource.mcp = undefined;
@@ -243,6 +256,9 @@ export function apply(ctx: Context, config: Config = {}): void {
       stopping = true;
       await resources.dispose();
       active.clear();
+      mcpReady.clear();
+      mcpQueues.clear();
+      revisions.clear();
     };
   }, 'workdsh.browser.sessions');
 
@@ -261,6 +277,8 @@ export function apply(ctx: Context, config: Config = {}): void {
     agent.ctx.effect(() => () => {
       active.delete(agent);
       mcpReady.delete(agent);
+      mcpQueues.delete(agent);
+      revisions.delete(agent);
     }, 'workdsh.browser.activation');
     return undefined;
   }, { prepend: true });
@@ -274,12 +292,18 @@ export function apply(ctx: Context, config: Config = {}): void {
     if (stopping || agent === undefined || !resources.available(agent)) {
       throw new Error(`${MCP_NAME}: browser tool belongs to another Session`);
     }
+    const revision = revisions.get(agent) ?? 0;
     return resources.run(agent, exec.signal, async (_resource, combined) => {
       const original = exec.signal;
       exec.signal = combined;
       try {
         const result = await next();
-        if (exec.name.startsWith(`${TOOL_PREFIX}browser_`) && !result.isError) active.add(agent);
+        if (!result.isError) {
+          const change = browserToolActivity(exec.name, exec.arguments);
+          // A page action that began before a successful close must not revive
+          // the closed view when its tool result arrives late.
+          if (change === 'closed' || (revisions.get(agent) ?? 0) === revision) activity(agent, change);
+        }
         return result;
       }
       finally { exec.signal = original; }
