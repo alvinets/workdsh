@@ -74,7 +74,6 @@ export function apply(ctx: Context, config: Config = {}): void {
     .filter(key => key.toUpperCase().startsWith('PLAYWRIGHT_MCP_'))
     .map(key => [key, '']));
   let resources!: SessionResources<BrowserResource>;
-  const ready = new Set<Agent>();
   const active = new Set<Agent>();
   const mcpReady = new Set<Agent>();
   const mcpQueues = new Map<Agent, Promise<void>>();
@@ -85,7 +84,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     signal: AbortSignal,
     action?: (page: import('playwright-core').Page) => Promise<void>,
   ): Promise<BrowserFrame> => {
-    if (stopping || !ready.has(agent)) throw new Error(`${MCP_NAME}: Session browser is unavailable`);
+    if (stopping || !resources.available(agent)) throw new Error(`${MCP_NAME}: Session browser is unavailable`);
     return resources.run(agent, signal, async ({ browser }, combined) => {
       combined.throwIfAborted();
       const page = browser.context.pages().at(-1);
@@ -129,22 +128,27 @@ export function apply(ctx: Context, config: Config = {}): void {
     const previous = mcpQueues.get(agent) ?? Promise.resolve();
     const task = previous.catch(() => {}).then(async () => {
       if (stopping || !resources) return;
-      let resource: BrowserResource;
-      try { resource = await resources.get(agent); }
-      catch { return; }
-      if (resource.closed) return;
-      if (enabled) {
-        if (resource.mcp !== undefined) return;
-        const mcp = await mountMcp(agent, resource.browser);
-        if (resource.closed) { await mcp.dispose(); return; }
-        resource.mcp = mcp;
-        mcpReady.add(agent);
-      } else if (resource.mcp !== undefined) {
+      if (!enabled) {
+        // A disabled agent without a mounted MCP owns no browser; do not acquire one.
+        if (!mcpReady.has(agent)) return;
+        let resource: BrowserResource;
+        try { resource = await resources.get(agent); }
+        catch { return; }
+        if (resource.mcp === undefined) { mcpReady.delete(agent); return; }
         const mcp = resource.mcp;
         resource.mcp = undefined;
         mcpReady.delete(agent);
         await mcp.dispose();
+        return;
       }
+      let resource: BrowserResource;
+      try { resource = await resources.get(agent); }
+      catch { return; }
+      if (resource.closed || resource.mcp !== undefined) return;
+      const mcp = await mountMcp(agent, resource.browser);
+      if (resource.closed) { await mcp.dispose(); return; }
+      resource.mcp = mcp;
+      mcpReady.add(agent);
     });
     mcpQueues.set(agent, task);
     return task.finally(() => {
@@ -153,7 +157,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   };
 
   ctx.provide('workdshBrowserSession', {
-    available: agent => !stopping && ready.has(agent) && resources.available(agent),
+    available: agent => !stopping && resources.available(agent),
     active: agent => !stopping && active.has(agent) && resources.available(agent),
     setToolsEnabled,
     toolsEnabled: agent => !stopping && mcpReady.has(agent),
@@ -218,7 +222,6 @@ export function apply(ctx: Context, config: Config = {}): void {
             value: resource,
             async close() {
               resource.closed = true;
-              ready.delete(agent);
               active.delete(agent);
               mcpReady.delete(agent);
               mcpQueues.delete(agent);
@@ -239,14 +242,11 @@ export function apply(ctx: Context, config: Config = {}): void {
     yield async () => {
       stopping = true;
       await resources.dispose();
-      ready.clear();
       active.clear();
     };
   }, 'workdsh.browser.sessions');
 
-  ctx.on('agent/created', async ({ agent, signal }) => {
-    await resources.get(agent, signal);
-    ready.add(agent);
+  ctx.on('agent/created', ({ agent }) => {
     const gates = (ctx as unknown as {
       get(name: string): { getSync(): { state: { browserTools: boolean } } } | undefined;
     }).get('workdshToolGates');
@@ -254,15 +254,15 @@ export function apply(ctx: Context, config: Config = {}): void {
     try { enabled = gates?.getSync().state.browserTools ?? true; }
     catch { enabled = true; }
     if (enabled) {
-      await setToolsEnabled(agent, true).catch(error => {
+      void setToolsEnabled(agent, true).catch(error => {
         ctx.logger.warn(`${MCP_NAME}: browser tool mount failed: ${String(error)}`);
       });
     }
     agent.ctx.effect(() => () => {
-      ready.delete(agent);
       active.delete(agent);
       mcpReady.delete(agent);
     }, 'workdsh.browser.activation');
+    return undefined;
   }, { prepend: true });
 
   ctx.on('tools/execute', async (exec, next) => {
@@ -271,7 +271,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       && (exec.arguments as { server?: unknown }).server === MCP_NAME;
     if (!exec.name.startsWith(TOOL_PREFIX) && !ownResource) return next();
     const agent = exec.agent;
-    if (stopping || agent === undefined || !ready.has(agent)) {
+    if (stopping || agent === undefined || !resources.available(agent)) {
       throw new Error(`${MCP_NAME}: browser tool belongs to another Session`);
     }
     return resources.run(agent, exec.signal, async (_resource, combined) => {
