@@ -27,6 +27,18 @@
     ]
   },
   {
+    "path": "../../packages/tabular",
+    "title": "共享表格解析",
+    "status": "in_progress",
+    "directories": [
+      "src",
+      "tests"
+    ],
+    "requirements": [
+      "R15"
+    ]
+  },
+  {
     "path": "../../packages/bundle",
     "title": "默认组合包",
     "status": "in_progress",
@@ -117,19 +129,6 @@
       "src/remote",
       "src/client/components",
       "src/harness",
-      "tests"
-    ],
-    "moduleVersion": "0.1",
-    "requirements": [
-      "R06"
-    ]
-  },
-  {
-    "path": "../../packages/plugins/tool-gates",
-    "title": "高级工具门控",
-    "status": "in_progress",
-    "directories": [
-      "src",
       "tests"
     ],
     "moduleVersion": "0.1",
@@ -481,15 +480,9 @@
   {
     "path": "../../packages/providers/runtime-isolated",
     "title": "隔离执行提供方",
-    "status": "planned",
+    "status": "in_progress",
     "directories": [
-      "src/domain",
-      "src/services",
-      "src/storage",
-      "src/tools",
-      "src/remote",
-      "src/client/components",
-      "src/harness",
+      "src",
       "tests"
     ],
     "requirements": [
@@ -598,5 +591,33 @@
       "R09"
     ],
     "acceptanceNote": "说明预算推导与上游默认 headroomTokens 固定绝对值导致的无解情形；非可执行包。配置尚未投递到运行实例，端到端未执行。"
+  },
+  {
+    "path": "../../packages/plugins/workbenches",
+    "title": "工作台插件平台（3.0）",
+    "status": "in_progress",
+    "directories": [
+      "src/runtime",
+      "tests"
+    ],
+    "moduleVersion": "3.0",
+    "requirements": [
+      "R15"
+    ]
+  },
+  {
+    "path": "../../packages/plugins/quality-analysis",
+    "title": "质量分析工作台（3.0）",
+    "status": "in_progress",
+    "directories": [
+      "src/domain",
+      "tests",
+      "src/runtime",
+      "src/client"
+    ],
+    "moduleVersion": "3.0",
+    "requirements": [
+      "R15"
+    ]
   }
 ]
